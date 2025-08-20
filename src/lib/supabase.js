@@ -1,10 +1,10 @@
-import { createClient } from '@supabase/supabase-js'
+import { createClient } from "@supabase/supabase-js";
 
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL
-const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY
+const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
 
 if (!supabaseUrl || !supabaseAnonKey) {
-  throw new Error('Missing Supabase environment variables')
+  throw new Error("Missing Supabase environment variables");
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
@@ -13,54 +13,55 @@ export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
     persistSession: true,
     detectSessionInUrl: true,
     storage: localStorage,
-    storageKey: 'supabase-auth-token'
+    storageKey: "supabase-auth-token",
   },
   realtime: {
     params: {
-      eventsPerSecond: 10
-    }
-  }
-})
+      eventsPerSecond: 10,
+    },
+  },
+});
 
 // Database helper functions
 export const handleSupabaseError = (error) => {
-  console.error('Supabase error:', error)
+  console.error("Supabase error:", error);
 
-  if (error.code === 'PGRST301') {
-    return 'You do not have permission to perform this action.'
+  if (error.code === "PGRST301") {
+    return "You do not have permission to perform this action.";
   }
 
-  if (error.code === '23505') {
-    return 'This record already exists.'
+  if (error.code === "23505") {
+    return "This record already exists.";
   }
 
-  if (error.message.includes('JWT')) {
-    return 'Your session has expired. Please log in again.'
+  if (error.message.includes("JWT")) {
+    return "Your session has expired. Please log in again.";
   }
 
-  return error.message || 'An unexpected error occurred.'
-}
+  return error.message || "An unexpected error occurred.";
+};
 
 // Custom hook for real-time subscriptions
-export const useRealtimeSubscription = (table, callback, filter = '') => {
-  const { useEffect } = await import('react')
+export const useRealtimeSubscription = (table, callback, filter = "") => {
+  const { useEffect } = require("react"); // Changed from await import
 
   useEffect(() => {
     const subscription = supabase
       .channel(`realtime-${table}`)
-      .on('postgres_changes',
+      .on(
+        "postgres_changes",
         {
-          event: '*',
-          schema: 'public',
+          event: "*",
+          schema: "public",
           table: table,
-          filter: filter
+          filter: filter,
         },
-        callback
+        callback,
       )
-      .subscribe()
+      .subscribe();
 
     return () => {
-      supabase.removeChannel(subscription)
-    }
-  }, [table, callback, filter])
-}
+      supabase.removeChannel(subscription);
+    };
+  }, [table, callback, filter]);
+};
