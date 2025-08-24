@@ -30,6 +30,98 @@ const useStore = create(
     setShowActivityForm: (show) => set({ showActivityForm: show }),
     setShowContributionForm: (show) => set({ showContributionForm: show }),
 
+    // Initialize App
+    initializeApp: async () => {
+      try {
+        set({ isLoading: true });
+
+        // Get current session
+        const {
+          data: { session },
+          error: sessionError,
+        } = await supabase.auth.getSession();
+
+        if (sessionError) {
+          console.error("Session error:", sessionError);
+          set({ isLoading: false });
+          return;
+        }
+
+        if (session?.user) {
+          // User is logged in
+          set({ user: session.user, isAuthenticated: true });
+
+          // Fetch user profile
+          const profile = await get().fetchProfile(session.user.id);
+
+          if (profile) {
+            // Fetch all data
+            await Promise.all([
+              get().fetchUsers(),
+              get().fetchActivities(),
+              get().fetchContributions(),
+            ]);
+          }
+        }
+
+        // Listen for auth changes
+        supabase.auth.onAuthStateChange(async (event, session) => {
+          if (event === "SIGNED_IN" && session?.user) {
+            set({ user: session.user, isAuthenticated: true });
+            const profile = await get().fetchProfile(session.user.id);
+            if (profile) {
+              await Promise.all([
+                get().fetchUsers(),
+                get().fetchActivities(),
+                get().fetchContributions(),
+              ]);
+            }
+          } else if (event === "SIGNED_OUT") {
+            set({
+              user: null,
+              profile: null,
+              isAuthenticated: false,
+              users: [],
+              activities: [],
+              contributions: [],
+              notifications: [],
+            });
+          }
+        });
+      } catch (error) {
+        console.error("Error initializing app:", error);
+      } finally {
+        set({ isLoading: false });
+      }
+    },
+
+    // Permission functions
+    canCreateActivity: () => {
+      const { profile } = get();
+      return (
+        profile &&
+        [
+          "president",
+          "vice_president",
+          "treasurer",
+          "senior_executive",
+        ].includes(profile.role)
+      );
+    },
+
+    canCreateContribution: () => {
+      const { profile } = get();
+      return (
+        profile &&
+        [
+          "president",
+          "vice_president",
+          "treasurer",
+          "senior_executive",
+        ].includes(profile.role)
+      );
+    },
+
     // Auth Actions
     signUp: async (email, password, userData) => {
       try {
@@ -173,12 +265,7 @@ const useStore = create(
           .select(
             `
             *,
-            created_by:profiles!created_by(username, full_name),
-            activity_participants(
-              member_id,
-              status,
-              member:profiles(username, full_name)
-            )
+            created_by:profiles!created_by(username, full_name)
           `,
           )
           .order("date", { ascending: false });
@@ -288,21 +375,14 @@ const useStore = create(
 
     createContribution: async (contributionData) => {
       try {
-        const { user, profile } = get();
+        const { user, profile, users } = get();
         if (!user || !profile) throw new Error("No user logged in");
 
         // Get target user details
-        const targetUser = get().users.find(
+        const targetUser = users.find(
           (u) => u.id === contributionData.member_id,
         );
         if (!targetUser) throw new Error("Target user not found");
-
-        // Check permissions
-        if (!hasPermissionToCreateContribution(profile.role, targetUser.role)) {
-          throw new Error(
-            "You don't have permission to create contributions for this user",
-          );
-        }
 
         // Create contribution in database
         const { data: contribution, error: contributionError } = await supabase
@@ -326,8 +406,8 @@ const useStore = create(
 
         if (contributionError) throw contributionError;
 
-        // Update user points using a database function (recommended) or direct update
-        const { data: updatedProfile, error: updateError } = await supabase.rpc(
+        // Update user points using the database function
+        const { error: updateError } = await supabase.rpc(
           "increment_user_points",
           {
             user_id: contributionData.member_id,
@@ -335,19 +415,12 @@ const useStore = create(
           },
         );
 
-        // If the RPC function doesn't exist, fall back to direct update
         if (updateError) {
-          const { error: directUpdateError } = await supabase
-            .from("profiles")
-            .update({
-              points: targetUser.points + contributionData.points,
-            })
-            .eq("id", contributionData.member_id);
-
-          if (directUpdateError) {
-            console.warn("Error updating points:", directUpdateError);
-          }
+          console.warn("Error updating points:", updateError);
         }
+
+        // Refresh users data to get updated points
+        await get().fetchUsers();
 
         // Update local state
         set((state) => ({
@@ -362,12 +435,6 @@ const useStore = create(
         toast.error(message);
         return { data: null, error: message };
       }
-    },
-
-    // Permission check
-    hasPermissionToCreateContribution: (role, targetRole) => {
-      const rolesHierarchy = ["admin", "moderator", "user"];
-      return rolesHierarchy.indexOf(role) <= rolesHierarchy.indexOf(targetRole);
     },
   })),
 );

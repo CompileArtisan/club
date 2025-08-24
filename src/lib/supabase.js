@@ -40,28 +40,3 @@ export const handleSupabaseError = (error) => {
 
   return error.message || "An unexpected error occurred.";
 };
-
-// Custom hook for real-time subscriptions
-export const useRealtimeSubscription = (table, callback, filter = "") => {
-  const { useEffect } = require("react"); // Changed from await import
-
-  useEffect(() => {
-    const subscription = supabase
-      .channel(`realtime-${table}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "*",
-          schema: "public",
-          table: table,
-          filter: filter,
-        },
-        callback,
-      )
-      .subscribe();
-
-    return () => {
-      supabase.removeChannel(subscription);
-    };
-  }, [table, callback, filter]);
-};
