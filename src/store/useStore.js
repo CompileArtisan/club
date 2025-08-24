@@ -288,30 +288,45 @@ const useStore = create(
 
     createContribution: async (contributionData) => {
       try {
-        const { user } = get();
-        if (!user) throw new Error("No user logged in");
+        const { user, profile } = get();
+        if (!user || !profile) throw new Error("No user logged in");
 
-        // Start a transaction-like operation
+        // Get target user details
+        const targetUser = get().users.find(
+          (u) => u.id === contributionData.member_id,
+        );
+        if (!targetUser) throw new Error("Target user not found");
+
+        // Check permissions
+        if (!hasPermissionToCreateContribution(profile.role, targetUser.role)) {
+          throw new Error(
+            "You don't have permission to create contributions for this user",
+          );
+        }
+
+        // Create contribution in database
         const { data: contribution, error: contributionError } = await supabase
           .from("contributions")
           .insert([
             {
               ...contributionData,
               recorded_by: user.id,
+              created_at: new Date().toISOString(),
             },
           ])
           .select(
             `
             *,
             member:profiles!member_id(id, username, full_name),
-            recorded_by:profiles!recorded_by(username, full_name)
+            recorded_by:profiles!recorded_by(username, full_name),
+            activity:activities(title)
           `,
           )
           .single();
 
         if (contributionError) throw contributionError;
 
-        // Update user points
+        // Update user points using a database function (recommended) or direct update
         const { data: updatedProfile, error: updateError } = await supabase.rpc(
           "increment_user_points",
           {
@@ -320,32 +335,27 @@ const useStore = create(
           },
         );
 
+        // If the RPC function doesn't exist, fall back to direct update
         if (updateError) {
-          console.warn("Error updating points:", updateError);
+          const { error: directUpdateError } = await supabase
+            .from("profiles")
+            .update({
+              points: targetUser.points + contributionData.points,
+            })
+            .eq("id", contributionData.member_id);
+
+          if (directUpdateError) {
+            console.warn("Error updating points:", directUpdateError);
+          }
         }
 
         // Update local state
         set((state) => ({
           contributions: [contribution, ...state.contributions],
-          users: state.users.map((u) =>
-            u.id === contributionData.member_id
-              ? { ...u, points: u.points + contributionData.points }
-              : u,
-          ),
           showContributionForm: false,
         }));
 
-        // Create notification
-        await supabase.from("notifications").insert([
-          {
-            user_id: contributionData.member_id,
-            title: "Points Awarded!",
-            message: `You earned ${contributionData.points} points for: ${contributionData.description}`,
-            type: "contribution",
-          },
-        ]);
-
-        toast.success("Contribution recorded successfully!");
+        toast.success("Contribution added successfully!");
         return { data: contribution, error: null };
       } catch (error) {
         const message = handleSupabaseError(error);
@@ -354,96 +364,12 @@ const useStore = create(
       }
     },
 
-    // Notifications Actions
-    fetchNotifications: async () => {
-      try {
-        const { user } = get();
-        if (!user) return [];
-
-        const { data, error } = await supabase
-          .from("notifications")
-          .select("*")
-          .eq("user_id", user.id)
-          .order("created_at", { ascending: false });
-
-        if (error) throw error;
-
-        set({ notifications: data });
-        return data;
-      } catch (error) {
-        console.error("Error fetching notifications:", error);
-        return [];
-      }
-    },
-
-    markNotificationAsRead: async (notificationId) => {
-      try {
-        const { error } = await supabase
-          .from("notifications")
-          .update({ read: true })
-          .eq("id", notificationId);
-
-        if (error) throw error;
-
-        set((state) => ({
-          notifications: state.notifications.map((notif) =>
-            notif.id === notificationId ? { ...notif, read: true } : notif,
-          ),
-        }));
-      } catch (error) {
-        console.error("Error marking notification as read:", error);
-      }
-    },
-
-    // Utility Actions
-    hasRole: (requiredRoles) => {
-      const { profile } = get();
-      if (!profile) return false;
-
-      if (Array.isArray(requiredRoles)) {
-        return requiredRoles.includes(profile.role);
-      }
-
-      return profile.role === requiredRoles;
-    },
-
-    canCreateActivity: () => {
-      return get().hasRole(["president", "vice_president", "treasurer"]);
-    },
-
-    canCreateContribution: () => {
-      return get().hasRole([
-        "president",
-        "vice_president",
-        "treasurer",
-        "senior_executive",
-      ]);
-    },
-
-    // Initialize app data
-    initializeApp: async () => {
-      const { user } = get();
-      if (!user) return;
-
-      await Promise.all([
-        get().fetchProfile(user.id),
-        get().fetchUsers(),
-        get().fetchActivities(),
-        get().fetchContributions(),
-        get().fetchNotifications(),
-      ]);
+    // Permission check
+    hasPermissionToCreateContribution: (role, targetRole) => {
+      const rolesHierarchy = ["admin", "moderator", "user"];
+      return rolesHierarchy.indexOf(role) <= rolesHierarchy.indexOf(targetRole);
     },
   })),
 );
-
-// Set up auth state listener
-supabase.auth.onAuthStateChange(async (event, session) => {
-  useStore.getState().setUser(session?.user ?? null);
-  useStore.getState().setLoading(false);
-
-  if (event === "SIGNED_IN" && session?.user) {
-    await useStore.getState().initializeApp();
-  }
-});
 
 export default useStore;
