@@ -1,3 +1,4 @@
+// Fixed Dashboard.jsx
 import React, { useEffect, useState } from "react";
 import {
   User,
@@ -7,6 +8,8 @@ import {
   Users,
   LogOut,
   Trophy,
+  Calendar,
+  FileText,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import useStore from "../store/useStore";
@@ -16,6 +19,7 @@ import Leaderboard from "./Leaderboard";
 
 const Dashboard = ({ session }) => {
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   const {
     profile,
@@ -41,41 +45,72 @@ const Dashboard = ({ session }) => {
   // Load data when Dashboard mounts
   useEffect(() => {
     const loadData = async () => {
-      console.log("📊 Loading dashboard data...");
+      if (!session?.user?.id) {
+        console.error("No user session found");
+        setError("No user session found");
+        setLoading(false);
+        return;
+      }
+
+      console.log("📊 Loading dashboard data for user:", session.user.id);
       setLoading(true);
+      setError(null);
 
       try {
-        // Fetch profile first
-        await fetchProfile(session.user.id);
+        // Fetch profile first and handle the case where it might not exist
+        console.log("👤 Fetching profile...");
+        const profileResult = await fetchProfile(session.user.id);
 
-        // Then fetch other data
-        await Promise.all([
-          fetchUsers(),
-          fetchActivities(),
-          fetchContributions(),
-        ]);
+        if (!profileResult) {
+          // Profile doesn't exist, create one or handle appropriately
+          console.log(
+            "👤 Profile not found, user might need to complete setup",
+          );
+          // You might want to redirect to a profile setup page here
+          // For now, let's continue loading other data
+        }
 
-        console.log("✅ Dashboard data loaded");
+        // Fetch other data in parallel
+        console.log("📊 Fetching other data...");
+        const [usersResult, activitiesResult, contributionsResult] =
+          await Promise.allSettled([
+            fetchUsers(),
+            fetchActivities(),
+            fetchContributions(),
+          ]);
+
+        // Log results for debugging
+        if (usersResult.status === "rejected") {
+          console.error("Failed to fetch users:", usersResult.reason);
+        }
+        if (activitiesResult.status === "rejected") {
+          console.error("Failed to fetch activities:", activitiesResult.reason);
+        }
+        if (contributionsResult.status === "rejected") {
+          console.error(
+            "Failed to fetch contributions:",
+            contributionsResult.reason,
+          );
+        }
+
+        console.log("✅ Dashboard data loading completed");
       } catch (error) {
         console.error("❌ Error loading dashboard data:", error);
+        setError(`Failed to load dashboard: ${error.message}`);
       } finally {
         setLoading(false);
       }
     };
 
-    if (session?.user) {
-      loadData();
-    }
-  }, [
-    session?.user?.id,
-    fetchProfile,
-    fetchUsers,
-    fetchActivities,
-    fetchContributions,
-  ]);
+    loadData();
+  }, [session?.user?.id]); // Only depend on user ID
 
   const signOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.error("Error signing out:", error);
+    }
   };
 
   const getRoleDisplayName = (role) => {
@@ -99,16 +134,48 @@ const Dashboard = ({ session }) => {
     return colors[level] || "text-gray-600 bg-gray-50";
   };
 
-  if (loading || !profile) {
+  // Show error state
+  if (error) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <div className="text-lg mb-2 text-red-600">
+            Error Loading Dashboard
+          </div>
+          <div className="text-sm text-gray-500 mb-4">{error}</div>
+          <button
+            onClick={() => window.location.reload()}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+          >
+            Retry
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  // Show loading state only if still loading
+  if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
           <div className="text-lg mb-2">Setting up dashboard...</div>
           <div className="text-sm text-gray-500">Loading your data...</div>
+          <div className="mt-4">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
+          </div>
         </div>
       </div>
     );
   }
+
+  // Show dashboard even if profile is null (user might be new)
+  const displayProfile = profile || {
+    username: session.user.email?.split("@")[0] || "User",
+    role: "member",
+    points: 0,
+    level: "Bronze",
+  };
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -121,7 +188,8 @@ const Dashboard = ({ session }) => {
             </div>
             <div className="flex items-center space-x-4">
               <span className="text-sm text-gray-600">
-                Welcome, {profile.username} ({getRoleDisplayName(profile.role)})
+                Welcome, {displayProfile.username} (
+                {getRoleDisplayName(displayProfile.role)})
               </span>
               <button
                 onClick={signOut}
@@ -171,29 +239,57 @@ const Dashboard = ({ session }) => {
 
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
-        {/* Dashboard content remains the same as your original code */}
         {activeTab === "dashboard" && (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            {/* Your dashboard cards here - copy from original */}
             <div className="bg-white p-6 rounded-lg shadow">
-              <h3 className="text-lg font-medium">Your Points</h3>
-              <p className="text-3xl font-bold text-blue-600">
-                {profile.points}
-              </p>
+              <div className="flex items-center">
+                <Award className="w-8 h-8 text-blue-600 mr-3" />
+                <div>
+                  <h3 className="text-lg font-medium">Your Points</h3>
+                  <p className="text-3xl font-bold text-blue-600">
+                    {displayProfile.points}
+                  </p>
+                </div>
+              </div>
             </div>
             <div className="bg-white p-6 rounded-lg shadow">
-              <h3 className="text-lg font-medium">Your Level</h3>
-              <span
-                className={`px-3 py-1 rounded-full ${getLevelColor(profile.level)}`}
-              >
-                {profile.level}
-              </span>
+              <div className="flex items-center">
+                <Trophy className="w-8 h-8 text-purple-600 mr-3" />
+                <div>
+                  <h3 className="text-lg font-medium">Your Level</h3>
+                  <span
+                    className={`px-3 py-1 rounded-full ${getLevelColor(displayProfile.level)}`}
+                  >
+                    {displayProfile.level}
+                  </span>
+                </div>
+              </div>
             </div>
-            {/* Add other dashboard content */}
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center">
+                <Activity className="w-8 h-8 text-green-600 mr-3" />
+                <div>
+                  <h3 className="text-lg font-medium">Total Activities</h3>
+                  <p className="text-3xl font-bold text-green-600">
+                    {activities.length}
+                  </p>
+                </div>
+              </div>
+            </div>
+            <div className="bg-white p-6 rounded-lg shadow">
+              <div className="flex items-center">
+                <Users className="w-8 h-8 text-orange-600 mr-3" />
+                <div>
+                  <h3 className="text-lg font-medium">Total Members</h3>
+                  <p className="text-3xl font-bold text-orange-600">
+                    {users.length}
+                  </p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
-        {/* Other tabs - copy from your original Dashboard component */}
         {activeTab === "activities" && (
           <div>
             <div className="flex justify-between items-center mb-6">
@@ -209,23 +305,138 @@ const Dashboard = ({ session }) => {
               )}
             </div>
             <div className="space-y-4">
-              {activities.map((activity) => (
-                <div
-                  key={activity.id}
-                  className="bg-white p-6 rounded-lg shadow"
-                >
-                  <h3 className="text-lg font-medium">{activity.title}</h3>
-                  <p className="text-gray-600">{activity.description}</p>
-                  <p className="text-sm text-gray-500 mt-2">
-                    📅 {activity.date}
-                  </p>
+              {activities.length === 0 ? (
+                <div className="text-center py-8">
+                  <Activity className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No activities found</p>
                 </div>
-              ))}
+              ) : (
+                activities.map((activity) => (
+                  <div
+                    key={activity.id}
+                    className="bg-white p-6 rounded-lg shadow"
+                  >
+                    <h3 className="text-lg font-medium">{activity.title}</h3>
+                    <p className="text-gray-600">{activity.description}</p>
+                    <p className="text-sm text-gray-500 mt-2">
+                      📅 {activity.date}
+                    </p>
+                  </div>
+                ))
+              )}
             </div>
           </div>
         )}
 
-        {/* Add other tabs similarly */}
+        {activeTab === "members" && (
+          <div>
+            <h2 className="text-2xl font-bold mb-6">Members</h2>
+            <div className="bg-white rounded-lg shadow overflow-hidden">
+              {users.length === 0 ? (
+                <div className="text-center py-8">
+                  <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No members found</p>
+                </div>
+              ) : (
+                <div className="divide-y divide-gray-200">
+                  {users.map((user) => (
+                    <div
+                      key={user.id}
+                      className="px-6 py-4 flex items-center justify-between"
+                    >
+                      <div className="flex items-center space-x-4">
+                        <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
+                          <User className="h-5 w-5 text-gray-600" />
+                        </div>
+                        <div>
+                          <p className="text-lg font-medium text-gray-900">
+                            {user.username}
+                          </p>
+                          <p className="text-sm text-gray-500">
+                            {getRoleDisplayName(user.role)}
+                          </p>
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-4">
+                        <span
+                          className={`px-2 py-1 rounded-full text-sm font-medium ${getLevelColor(user.level)}`}
+                        >
+                          {user.level}
+                        </span>
+                        <div className="text-right">
+                          <p className="text-lg font-bold text-gray-900">
+                            {user.points}
+                          </p>
+                          <p className="text-xs text-gray-500">points</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {activeTab === "contributions" && (
+          <div>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold">Contributions</h2>
+              {canCreateContribution() && (
+                <button
+                  onClick={() => setShowContributionForm(true)}
+                  className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 flex items-center"
+                >
+                  <Plus className="w-4 h-4 mr-2" />
+                  Record Contribution
+                </button>
+              )}
+            </div>
+            <div className="space-y-4">
+              {contributions.length === 0 ? (
+                <div className="text-center py-8">
+                  <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
+                  <p className="text-gray-500">No contributions recorded</p>
+                </div>
+              ) : (
+                contributions.map((contribution) => {
+                  const member = users.find(
+                    (u) => u.id === contribution.member_id,
+                  );
+                  return (
+                    <div
+                      key={contribution.id}
+                      className="bg-white p-6 rounded-lg shadow"
+                    >
+                      <div className="flex justify-between items-start mb-2">
+                        <div>
+                          <h3 className="text-lg font-medium text-gray-900">
+                            {member?.username || "Unknown Member"}
+                          </h3>
+                          <p className="text-gray-600">
+                            {contribution.description}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <span className="inline-flex items-center px-2 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                            +{contribution.points} points
+                          </span>
+                        </div>
+                      </div>
+                      <div className="flex items-center justify-between text-sm text-gray-500">
+                        <span>
+                          {contribution.contribution_type?.replace("_", " ")}
+                        </span>
+                        <span>{contribution.date}</span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+          </div>
+        )}
+
         {activeTab === "leaderboard" && (
           <Leaderboard users={users} contributions={contributions} />
         )}
@@ -242,7 +453,7 @@ const Dashboard = ({ session }) => {
         isOpen={showContributionForm}
         onClose={() => setShowContributionForm(false)}
         onSubmit={(data) => createContribution(data, session.user.id)}
-        currentUser={profile}
+        currentUser={displayProfile}
         users={users}
         activities={activities}
       />
