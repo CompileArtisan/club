@@ -1,442 +1,230 @@
 import { create } from "zustand";
-import { subscribeWithSelector } from "zustand/middleware";
 import { supabase, handleSupabaseError } from "../lib/supabase";
 import toast from "react-hot-toast";
 
-const useStore = create(
-  subscribeWithSelector((set, get) => ({
-    // Auth State
-    user: null,
-    profile: null,
-    isLoading: true,
-    isAuthenticated: false,
+const useStore = create((set, get) => ({
+  // Data State
+  profile: null,
+  users: [],
+  activities: [],
+  contributions: [],
 
-    // Data State
-    users: [],
-    activities: [],
-    contributions: [],
-    notifications: [],
+  // UI State
+  activeTab: "dashboard",
+  showActivityForm: false,
+  showContributionForm: false,
 
-    // UI State
-    activeTab: "dashboard",
-    showActivityForm: false,
-    showContributionForm: false,
+  // Actions
+  setProfile: (profile) => set({ profile }),
+  setActiveTab: (activeTab) => set({ activeTab }),
+  setShowActivityForm: (show) => set({ showActivityForm: show }),
+  setShowContributionForm: (show) => set({ showContributionForm: show }),
 
-    // Actions
-    setUser: (user) => set({ user, isAuthenticated: !!user }),
-    setProfile: (profile) => set({ profile }),
-    setLoading: (isLoading) => set({ isLoading }),
-    setActiveTab: (activeTab) => set({ activeTab }),
-    setShowActivityForm: (show) => set({ showActivityForm: show }),
-    setShowContributionForm: (show) => set({ showContributionForm: show }),
+  // Permission functions
+  canCreateActivity: () => {
+    const { profile } = get();
+    return (
+      profile &&
+      ["president", "vice_president", "treasurer", "senior_executive"].includes(
+        profile.role,
+      )
+    );
+  },
 
-    // Initialize App
-    initializeApp: async () => {
-      try {
-        set({ isLoading: true });
+  canCreateContribution: () => {
+    const { profile } = get();
+    return (
+      profile &&
+      ["president", "vice_president", "treasurer", "senior_executive"].includes(
+        profile.role,
+      )
+    );
+  },
 
-        // Get current session
-        const {
-          data: { session },
-          error: sessionError,
-        } = await supabase.auth.getSession();
+  // Profile Actions
+  fetchProfile: async (userId) => {
+    try {
+      console.log("👤 Fetching profile for:", userId);
 
-        if (sessionError) {
-          console.error("Session error:", sessionError);
-          set({ isLoading: false });
-          return;
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("id", userId)
+        .single();
+
+      if (error) {
+        if (error.code === "PGRST116") {
+          console.log("👤 Profile not found - user might be new");
+          return null;
         }
-
-        if (session?.user) {
-          // User is logged in
-          set({ user: session.user, isAuthenticated: true });
-
-          // Fetch user profile
-          const profile = await get().fetchProfile(session.user.id);
-
-          if (profile) {
-            // Fetch all data
-            await Promise.all([
-              get().fetchUsers(),
-              get().fetchActivities(),
-              get().fetchContributions(),
-            ]);
-          }
-        }
-
-        // Listen for auth changes
-        supabase.auth.onAuthStateChange(async (event, session) => {
-          if (event === "SIGNED_IN" && session?.user) {
-            set({ user: session.user, isAuthenticated: true });
-            const profile = await get().fetchProfile(session.user.id);
-            if (profile) {
-              await Promise.all([
-                get().fetchUsers(),
-                get().fetchActivities(),
-                get().fetchContributions(),
-              ]);
-            }
-          } else if (event === "SIGNED_OUT") {
-            set({
-              user: null,
-              profile: null,
-              isAuthenticated: false,
-              users: [],
-              activities: [],
-              contributions: [],
-              notifications: [],
-            });
-          }
-        });
-      } catch (error) {
-        console.error("Error initializing app:", error);
-      } finally {
-        set({ isLoading: false });
+        throw error;
       }
-    },
 
-    // Permission functions
-    canCreateActivity: () => {
-      const { profile } = get();
-      return (
-        profile &&
-        [
-          "president",
-          "vice_president",
-          "treasurer",
-          "senior_executive",
-        ].includes(profile.role)
-      );
-    },
+      console.log("✅ Profile fetched:", data);
+      set({ profile: data });
+      return data;
+    } catch (error) {
+      console.error("Error fetching profile:", error);
+      return null;
+    }
+  },
 
-    canCreateContribution: () => {
-      const { profile } = get();
-      return (
-        profile &&
-        [
-          "president",
-          "vice_president",
-          "treasurer",
-          "senior_executive",
-        ].includes(profile.role)
-      );
-    },
+  // Data fetching
+  fetchUsers: async () => {
+    try {
+      const { data, error } = await supabase
+        .from("profiles")
+        .select("*")
+        .order("points", { ascending: false });
 
-    // Auth Actions
-    signUp: async (email, password, userData) => {
-      try {
-        set({ isLoading: true });
+      if (error) throw error;
 
-        const { data, error } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: userData,
-          },
-        });
+      set({ users: data || [] });
+      return data || [];
+    } catch (error) {
+      console.error("Error fetching users:", error);
+      set({ users: [] });
+      return [];
+    }
+  },
 
-        if (error) throw error;
+  fetchActivities: async () => {
+    try {
+      const { data, error } = await supabase
+        .from("activities")
+        .select(
+          `
+          *,
+          created_by:profiles!created_by(username, full_name)
+        `,
+        )
+        .order("date", { ascending: false });
 
-        toast.success("Account created! Check your email to verify.");
-        return { data, error: null };
-      } catch (error) {
-        const message = handleSupabaseError(error);
-        toast.error(message);
-        return { data: null, error: message };
-      } finally {
-        set({ isLoading: false });
-      }
-    },
+      if (error) throw error;
 
-    signIn: async (email, password) => {
-      try {
-        set({ isLoading: true });
+      set({ activities: data || [] });
+      return data || [];
+    } catch (error) {
+      console.error("Error fetching activities:", error);
+      set({ activities: [] });
+      return [];
+    }
+  },
 
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
+  fetchContributions: async () => {
+    try {
+      const { data, error } = await supabase
+        .from("contributions")
+        .select(
+          `
+          *,
+          member:profiles!member_id(id, username, full_name),
+          recorded_by:profiles!recorded_by(username, full_name),
+          activity:activities(title)
+        `,
+        )
+        .order("created_at", { ascending: false });
 
-        if (error) throw error;
+      if (error) throw error;
 
-        toast.success("Signed in successfully!");
-        return { data, error: null };
-      } catch (error) {
-        const message = handleSupabaseError(error);
-        toast.error(message);
-        return { data: null, error: message };
-      } finally {
-        set({ isLoading: false });
-      }
-    },
+      set({ contributions: data || [] });
+      return data || [];
+    } catch (error) {
+      console.error("Error fetching contributions:", error);
+      set({ contributions: [] });
+      return [];
+    }
+  },
 
-    signOut: async () => {
-      try {
-        set({ isLoading: true });
-
-        const { error } = await supabase.auth.signOut();
-        if (error) throw error;
-
-        set({
-          user: null,
-          profile: null,
-          isAuthenticated: false,
-          users: [],
-          activities: [],
-          contributions: [],
-          notifications: [],
-        });
-
-        toast.success("Signed out successfully!");
-      } catch (error) {
-        const message = handleSupabaseError(error);
-        toast.error(message);
-      } finally {
-        set({ isLoading: false });
-      }
-    },
-
-    // Profile Actions
-    fetchProfile: async (userId) => {
-      try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("*")
-          .eq("id", userId)
-          .single();
-
-        if (error) throw error;
-
-        set({ profile: data });
-        return data;
-      } catch (error) {
-        console.error("Error fetching profile:", error);
-        return null;
-      }
-    },
-
-    updateProfile: async (updates) => {
-      try {
-        const { user } = get();
-        if (!user) throw new Error("No user logged in");
-
-        const { data, error } = await supabase
-          .from("profiles")
-          .update(updates)
-          .eq("id", user.id)
-          .select()
-          .single();
-
-        if (error) throw error;
-
-        set({ profile: data });
-        toast.success("Profile updated successfully!");
-        return { data, error: null };
-      } catch (error) {
-        const message = handleSupabaseError(error);
-        toast.error(message);
-        return { data: null, error: message };
-      }
-    },
-
-    // Users Actions
-    fetchUsers: async () => {
-      try {
-        const { data, error } = await supabase
-          .from("profiles")
-          .select("*")
-          .order("points", { ascending: false });
-
-        if (error) throw error;
-
-        set({ users: data });
-        return data;
-      } catch (error) {
-        console.error("Error fetching users:", error);
-        return [];
-      }
-    },
-
-    // Activities Actions
-    fetchActivities: async () => {
-      try {
-        const { data, error } = await supabase
-          .from("activities")
-          .select(
-            `
-            *,
-            created_by:profiles!created_by(username, full_name)
-          `,
-          )
-          .order("date", { ascending: false });
-
-        if (error) throw error;
-
-        set({ activities: data });
-        return data;
-      } catch (error) {
-        console.error("Error fetching activities:", error);
-        return [];
-      }
-    },
-
-    createActivity: async (activityData) => {
-      try {
-        const { user } = get();
-        if (!user) throw new Error("No user logged in");
-
-        const { data, error } = await supabase
-          .from("activities")
-          .insert([
-            {
-              ...activityData,
-              created_by: user.id,
-            },
-          ])
-          .select(
-            `
-            *,
-            created_by:profiles!created_by(username, full_name)
-          `,
-          )
-          .single();
-
-        if (error) throw error;
-
-        set((state) => ({
-          activities: [data, ...state.activities],
-          showActivityForm: false,
-        }));
-
-        toast.success("Activity created successfully!");
-        return { data, error: null };
-      } catch (error) {
-        const message = handleSupabaseError(error);
-        toast.error(message);
-        return { data: null, error: message };
-      }
-    },
-
-    updateActivity: async (activityId, updates) => {
-      try {
-        const { data, error } = await supabase
-          .from("activities")
-          .update(updates)
-          .eq("id", activityId)
-          .select(
-            `
-            *,
-            created_by:profiles!created_by(username, full_name)
-          `,
-          )
-          .single();
-
-        if (error) throw error;
-
-        set((state) => ({
-          activities: state.activities.map((activity) =>
-            activity.id === activityId ? data : activity,
-          ),
-        }));
-
-        toast.success("Activity updated successfully!");
-        return { data, error: null };
-      } catch (error) {
-        const message = handleSupabaseError(error);
-        toast.error(message);
-        return { data: null, error: message };
-      }
-    },
-
-    // Contributions Actions
-    fetchContributions: async () => {
-      try {
-        const { data, error } = await supabase
-          .from("contributions")
-          .select(
-            `
-            *,
-            member:profiles!member_id(id, username, full_name),
-            recorded_by:profiles!recorded_by(username, full_name),
-            activity:activities(title)
-          `,
-          )
-          .order("created_at", { ascending: false });
-
-        if (error) throw error;
-
-        set({ contributions: data });
-        return data;
-      } catch (error) {
-        console.error("Error fetching contributions:", error);
-        return [];
-      }
-    },
-
-    createContribution: async (contributionData) => {
-      try {
-        const { user, profile, users } = get();
-        if (!user || !profile) throw new Error("No user logged in");
-
-        // Get target user details
-        const targetUser = users.find(
-          (u) => u.id === contributionData.member_id,
-        );
-        if (!targetUser) throw new Error("Target user not found");
-
-        // Create contribution in database
-        const { data: contribution, error: contributionError } = await supabase
-          .from("contributions")
-          .insert([
-            {
-              ...contributionData,
-              recorded_by: user.id,
-              created_at: new Date().toISOString(),
-            },
-          ])
-          .select(
-            `
-            *,
-            member:profiles!member_id(id, username, full_name),
-            recorded_by:profiles!recorded_by(username, full_name),
-            activity:activities(title)
-          `,
-          )
-          .single();
-
-        if (contributionError) throw contributionError;
-
-        // Update user points using the database function
-        const { error: updateError } = await supabase.rpc(
-          "increment_user_points",
+  createActivity: async (activityData, userId) => {
+    try {
+      const { data, error } = await supabase
+        .from("activities")
+        .insert([
           {
-            user_id: contributionData.member_id,
-            points_to_add: contributionData.points,
+            ...activityData,
+            created_by: userId,
           },
-        );
+        ])
+        .select(
+          `
+          *,
+          created_by:profiles!created_by(username, full_name)
+        `,
+        )
+        .single();
 
-        if (updateError) {
-          console.warn("Error updating points:", updateError);
-        }
+      if (error) throw error;
 
-        // Refresh users data to get updated points
-        await get().fetchUsers();
+      set((state) => ({
+        activities: [data, ...state.activities],
+        showActivityForm: false,
+      }));
 
-        // Update local state
-        set((state) => ({
-          contributions: [contribution, ...state.contributions],
-          showContributionForm: false,
-        }));
+      toast.success("Activity created successfully!");
+      return { data, error: null };
+    } catch (error) {
+      const message = handleSupabaseError(error);
+      toast.error(message);
+      return { data: null, error: message };
+    }
+  },
 
-        toast.success("Contribution added successfully!");
-        return { data: contribution, error: null };
-      } catch (error) {
-        const message = handleSupabaseError(error);
-        toast.error(message);
-        return { data: null, error: message };
+  createContribution: async (contributionData, userId) => {
+    try {
+      const { users } = get();
+
+      const targetUser = users.find((u) => u.id === contributionData.member_id);
+      if (!targetUser) throw new Error("Target user not found");
+
+      const { data: contribution, error: contributionError } = await supabase
+        .from("contributions")
+        .insert([
+          {
+            ...contributionData,
+            recorded_by: userId,
+            created_at: new Date().toISOString(),
+          },
+        ])
+        .select(
+          `
+          *,
+          member:profiles!member_id(id, username, full_name),
+          recorded_by:profiles!recorded_by(username, full_name),
+          activity:activities(title)
+        `,
+        )
+        .single();
+
+      if (contributionError) throw contributionError;
+
+      const { error: updateError } = await supabase.rpc(
+        "increment_user_points",
+        {
+          user_id: contributionData.member_id,
+          points_to_add: contributionData.points,
+        },
+      );
+
+      if (updateError) {
+        console.warn("Error updating points:", updateError);
       }
-    },
-  })),
-);
+
+      await get().fetchUsers();
+
+      set((state) => ({
+        contributions: [contribution, ...state.contributions],
+        showContributionForm: false,
+      }));
+
+      toast.success("Contribution added successfully!");
+      return { data: contribution, error: null };
+    } catch (error) {
+      const message = handleSupabaseError(error);
+      toast.error(message);
+      return { data: null, error: message };
+    }
+  },
+}));
 
 export default useStore;

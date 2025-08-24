@@ -1,10 +1,11 @@
 import React, { useState } from "react";
 import { User, Mail, Lock } from "lucide-react";
-import useStore from "../store/useStore";
+import { supabase, handleSupabaseError } from "../lib/supabase";
+import toast from "react-hot-toast";
 
 const AuthForm = () => {
-  const { signIn, signUp, isLoading } = useStore();
   const [isSignUp, setIsSignUp] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     email: "",
     password: "",
@@ -14,14 +15,37 @@ const AuthForm = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
 
-    if (isSignUp) {
-      await signUp(formData.email, formData.password, {
-        username: formData.username,
-        full_name: formData.fullName,
-      });
-    } else {
-      await signIn(formData.email, formData.password);
+    try {
+      if (isSignUp) {
+        const { error } = await supabase.auth.signUp({
+          email: formData.email,
+          password: formData.password,
+          options: {
+            data: {
+              username: formData.username,
+              full_name: formData.fullName,
+            },
+          },
+        });
+
+        if (error) throw error;
+        toast.success("Account created! Check your email to verify.");
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({
+          email: formData.email,
+          password: formData.password,
+        });
+
+        if (error) throw error;
+        toast.success("Signed in successfully!");
+      }
+    } catch (error) {
+      const message = handleSupabaseError(error);
+      toast.error(message);
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -34,6 +58,7 @@ const AuthForm = () => {
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Your form fields remain the same */}
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Email
