@@ -1,4 +1,3 @@
-// Fixed src/store/useStore.js
 import { create } from "zustand";
 import { supabase, handleSupabaseError } from "../lib/supabase";
 import toast from "react-hot-toast";
@@ -45,7 +44,7 @@ const useStore = create((set, get) => ({
   // Profile Actions
   fetchProfile: async (userId) => {
     try {
-      console.log("👤 Fetching profile for:", userId);
+      console.log("Fetching profile for:", userId);
 
       const { data, error } = await supabase
         .from("profiles")
@@ -55,27 +54,71 @@ const useStore = create((set, get) => ({
 
       if (error) {
         if (error.code === "PGRST116") {
-          console.log("👤 Profile not found - user might be new");
+          console.log("Profile not found - user might be new");
           set({ profile: null });
           return null;
         }
         throw error;
       }
 
-      console.log("✅ Profile fetched:", data);
+      console.log("Profile fetched:", data);
       set({ profile: data });
       return data;
     } catch (error) {
-      console.error("❌ Error fetching profile:", error);
+      console.error("Error fetching profile:", error);
       set({ profile: null });
       return null;
+    }
+  },
+
+  createProfile: async (userId, userData) => {
+    try {
+      console.log("Creating profile for:", userId, userData);
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .insert([
+          {
+            id: userId,
+            username: userData.username || "user",
+            full_name: userData.fullName || "",
+            role: "member",
+            points: 0,
+            level: "Bronze",
+          },
+        ])
+        .select()
+        .single();
+
+      if (error) {
+        // Handle unique constraint violations
+        if (error.code === "23505") {
+          if (error.message.includes("username")) {
+            throw new Error(
+              "Username already exists. Please choose a different one.",
+            );
+          }
+          throw new Error("This profile already exists.");
+        }
+        throw error;
+      }
+
+      console.log("Profile created:", data);
+      set({ profile: data });
+      toast.success("Profile created successfully!");
+      return data;
+    } catch (error) {
+      console.error("Error creating profile:", error);
+      const message = handleSupabaseError(error);
+      toast.error(message);
+      throw error;
     }
   },
 
   // Data fetching with better error handling
   fetchUsers: async () => {
     try {
-      console.log("👥 Fetching users...");
+      console.log("Fetching users...");
       const { data, error } = await supabase
         .from("profiles")
         .select("*")
@@ -83,20 +126,19 @@ const useStore = create((set, get) => ({
 
       if (error) throw error;
 
-      console.log("✅ Users fetched:", data?.length || 0);
+      console.log("Users fetched:", data?.length || 0);
       set({ users: data || [] });
       return data || [];
     } catch (error) {
-      console.error("❌ Error fetching users:", error);
+      console.error("Error fetching users:", error);
       set({ users: [] });
-      // Don't throw error to prevent infinite loading
       return [];
     }
   },
 
   fetchActivities: async () => {
     try {
-      console.log("🎯 Fetching activities...");
+      console.log("Fetching activities...");
       const { data, error } = await supabase
         .from("activities")
         .select(
@@ -109,20 +151,19 @@ const useStore = create((set, get) => ({
 
       if (error) throw error;
 
-      console.log("✅ Activities fetched:", data?.length || 0);
+      console.log("Activities fetched:", data?.length || 0);
       set({ activities: data || [] });
       return data || [];
     } catch (error) {
-      console.error("❌ Error fetching activities:", error);
+      console.error("Error fetching activities:", error);
       set({ activities: [] });
-      // Don't throw error to prevent infinite loading
       return [];
     }
   },
 
   fetchContributions: async () => {
     try {
-      console.log("🏆 Fetching contributions...");
+      console.log("Fetching contributions...");
       const { data, error } = await supabase
         .from("contributions")
         .select(
@@ -137,20 +178,19 @@ const useStore = create((set, get) => ({
 
       if (error) throw error;
 
-      console.log("✅ Contributions fetched:", data?.length || 0);
+      console.log("Contributions fetched:", data?.length || 0);
       set({ contributions: data || [] });
       return data || [];
     } catch (error) {
-      console.error("❌ Error fetching contributions:", error);
+      console.error("Error fetching contributions:", error);
       set({ contributions: [] });
-      // Don't throw error to prevent infinite loading
       return [];
     }
   },
 
   createActivity: async (activityData, userId) => {
     try {
-      console.log("🎯 Creating activity:", activityData);
+      console.log("Creating activity:", activityData);
 
       const { data, error } = await supabase
         .from("activities")
@@ -176,10 +216,10 @@ const useStore = create((set, get) => ({
       }));
 
       toast.success("Activity created successfully!");
-      console.log("✅ Activity created:", data);
+      console.log("Activity created:", data);
       return { data, error: null };
     } catch (error) {
-      console.error("❌ Error creating activity:", error);
+      console.error("Error creating activity:", error);
       const message = handleSupabaseError(error);
       toast.error(message);
       return { data: null, error: message };
@@ -188,12 +228,22 @@ const useStore = create((set, get) => ({
 
   createContribution: async (contributionData, userId) => {
     try {
-      console.log("🏆 Creating contribution:", contributionData);
+      console.log("Creating contribution:", contributionData);
       const { users } = get();
 
       const targetUser = users.find((u) => u.id === contributionData.member_id);
       if (!targetUser) throw new Error("Target user not found");
 
+      // Verify permission hierarchy
+      const currentUser = get().profile;
+      if (!currentUser) throw new Error("You must be logged in");
+
+      const canCreate = get().canCreateContribution();
+      if (!canCreate) {
+        throw new Error("You don't have permission to record contributions");
+      }
+
+      // Create contribution record
       const { data: contribution, error: contributionError } = await supabase
         .from("contributions")
         .insert([
@@ -215,7 +265,7 @@ const useStore = create((set, get) => ({
 
       if (contributionError) throw contributionError;
 
-      // Update user points
+      // Update user points using the database function
       const { error: updateError } = await supabase.rpc(
         "increment_user_points",
         {
@@ -225,11 +275,14 @@ const useStore = create((set, get) => ({
       );
 
       if (updateError) {
-        console.warn("⚠️ Error updating points:", updateError);
-        // Continue anyway, just log the warning
+        console.error("Error updating points:", updateError);
+        // Continue anyway since the contribution was recorded
+        toast.warning(
+          "Contribution recorded but points update failed. Please refresh.",
+        );
       }
 
-      // Refresh users to get updated points
+      // Refresh users to get updated points and levels
       await get().fetchUsers();
 
       set((state) => ({
@@ -237,15 +290,45 @@ const useStore = create((set, get) => ({
         showContributionForm: false,
       }));
 
-      toast.success("Contribution added successfully!");
-      console.log("✅ Contribution created:", contribution);
+      toast.success(
+        `Contribution recorded! +${contributionData.points} points for ${targetUser.username}`,
+      );
+      console.log("Contribution created:", contribution);
       return { data: contribution, error: null };
     } catch (error) {
-      console.error("❌ Error creating contribution:", error);
+      console.error("Error creating contribution:", error);
       const message = handleSupabaseError(error);
       toast.error(message);
       return { data: null, error: message };
     }
+  },
+
+  // Utility function to refresh all data
+  refreshAllData: async () => {
+    try {
+      console.log("Refreshing all data...");
+      await Promise.all([
+        get().fetchUsers(),
+        get().fetchActivities(),
+        get().fetchContributions(),
+      ]);
+      console.log("All data refreshed");
+    } catch (error) {
+      console.error("Error refreshing data:", error);
+    }
+  },
+
+  // Clear all data (useful for logout)
+  clearData: () => {
+    set({
+      profile: null,
+      users: [],
+      activities: [],
+      contributions: [],
+      activeTab: "dashboard",
+      showActivityForm: false,
+      showContributionForm: false,
+    });
   },
 }));
 

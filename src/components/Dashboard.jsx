@@ -1,4 +1,3 @@
-// Fixed Dashboard.jsx
 import React, { useEffect, useState } from "react";
 import {
   User,
@@ -10,6 +9,7 @@ import {
   Trophy,
   Calendar,
   FileText,
+  AlertCircle,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import useStore from "../store/useStore";
@@ -20,6 +20,7 @@ import Leaderboard from "./Leaderboard";
 const Dashboard = ({ session }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showProfileSetup, setShowProfileSetup] = useState(false);
 
   const {
     profile,
@@ -40,6 +41,7 @@ const Dashboard = ({ session }) => {
     fetchUsers,
     fetchActivities,
     fetchContributions,
+    createProfile,
   } = useStore();
 
   // Load data when Dashboard mounts
@@ -52,26 +54,37 @@ const Dashboard = ({ session }) => {
         return;
       }
 
-      console.log("📊 Loading dashboard data for user:", session.user.id);
+      console.log("Loading dashboard data for user:", session.user.id);
       setLoading(true);
       setError(null);
 
       try {
-        // Fetch profile first and handle the case where it might not exist
-        console.log("👤 Fetching profile...");
+        // Try to fetch profile first
+        console.log("Fetching profile...");
         const profileResult = await fetchProfile(session.user.id);
 
         if (!profileResult) {
-          // Profile doesn't exist, create one or handle appropriately
-          console.log(
-            "👤 Profile not found, user might need to complete setup",
-          );
-          // You might want to redirect to a profile setup page here
-          // For now, let's continue loading other data
+          // Profile doesn't exist, try to create one
+          console.log("Profile not found, attempting to create...");
+          try {
+            const userData = {
+              username:
+                session.user.user_metadata?.username ||
+                session.user.email?.split("@")[0] ||
+                "user",
+              fullName: session.user.user_metadata?.full_name || "",
+            };
+
+            await createProfile(session.user.id, userData);
+            console.log("Profile created successfully");
+          } catch (createError) {
+            console.error("Failed to create profile:", createError);
+            setShowProfileSetup(true);
+          }
         }
 
         // Fetch other data in parallel
-        console.log("📊 Fetching other data...");
+        console.log("Fetching other data...");
         const [usersResult, activitiesResult, contributionsResult] =
           await Promise.allSettled([
             fetchUsers(),
@@ -93,9 +106,9 @@ const Dashboard = ({ session }) => {
           );
         }
 
-        console.log("✅ Dashboard data loading completed");
+        console.log("Dashboard data loading completed");
       } catch (error) {
-        console.error("❌ Error loading dashboard data:", error);
+        console.error("Error loading dashboard data:", error);
         setError(`Failed to load dashboard: ${error.message}`);
       } finally {
         setLoading(false);
@@ -103,13 +116,22 @@ const Dashboard = ({ session }) => {
     };
 
     loadData();
-  }, [session?.user?.id]); // Only depend on user ID
+  }, [session?.user?.id]);
 
   const signOut = async () => {
     try {
       await supabase.auth.signOut();
     } catch (error) {
       console.error("Error signing out:", error);
+    }
+  };
+
+  const handleProfileSetup = async (setupData) => {
+    try {
+      await createProfile(session.user.id, setupData);
+      setShowProfileSetup(false);
+    } catch (error) {
+      console.error("Error setting up profile:", error);
     }
   };
 
@@ -133,6 +155,85 @@ const Dashboard = ({ session }) => {
     };
     return colors[level] || "text-gray-600 bg-gray-50";
   };
+
+  // Profile Setup Component
+  const ProfileSetup = () => {
+    const [setupData, setSetupData] = useState({
+      username: session.user.email?.split("@")[0] || "",
+      fullName: "",
+    });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    const handleSubmit = async (e) => {
+      e.preventDefault();
+      setIsSubmitting(true);
+      try {
+        await handleProfileSetup(setupData);
+      } finally {
+        setIsSubmitting(false);
+      }
+    };
+
+    return (
+      <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+        <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
+          <div className="text-center mb-6">
+            <AlertCircle className="w-12 h-12 text-blue-600 mx-auto mb-4" />
+            <h2 className="text-2xl font-bold text-gray-900">
+              Setup Your Profile
+            </h2>
+            <p className="text-gray-600">
+              Complete your club profile to continue
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Username
+              </label>
+              <input
+                type="text"
+                value={setupData.username}
+                onChange={(e) =>
+                  setSetupData({ ...setupData, username: e.target.value })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+                required
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Full Name (Optional)
+              </label>
+              <input
+                type="text"
+                value={setupData.fullName}
+                onChange={(e) =>
+                  setSetupData({ ...setupData, fullName: e.target.value })
+                }
+                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+            </div>
+
+            <button
+              type="submit"
+              disabled={isSubmitting || !setupData.username}
+              className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition duration-200 disabled:opacity-50"
+            >
+              {isSubmitting ? "Setting up..." : "Complete Setup"}
+            </button>
+          </form>
+        </div>
+      </div>
+    );
+  };
+
+  // Show profile setup if needed
+  if (showProfileSetup) {
+    return <ProfileSetup />;
+  }
 
   // Show error state
   if (error) {
@@ -169,7 +270,7 @@ const Dashboard = ({ session }) => {
     );
   }
 
-  // Show dashboard even if profile is null (user might be new)
+  // Show dashboard even if profile is null (fallback)
   const displayProfile = profile || {
     username: session.user.email?.split("@")[0] || "User",
     role: "member",
@@ -319,7 +420,7 @@ const Dashboard = ({ session }) => {
                     <h3 className="text-lg font-medium">{activity.title}</h3>
                     <p className="text-gray-600">{activity.description}</p>
                     <p className="text-sm text-gray-500 mt-2">
-                      📅 {activity.date}
+                      {activity.date}
                     </p>
                   </div>
                 ))
