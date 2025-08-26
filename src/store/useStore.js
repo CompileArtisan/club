@@ -13,12 +13,14 @@ const useStore = create((set, get) => ({
   activeTab: "dashboard",
   showActivityForm: false,
   showContributionForm: false,
+  showRoleManagement: false,
 
   // Actions
   setProfile: (profile) => set({ profile }),
   setActiveTab: (activeTab) => set({ activeTab }),
   setShowActivityForm: (show) => set({ showActivityForm: show }),
   setShowContributionForm: (show) => set({ showContributionForm: show }),
+  setShowRoleManagement: (show) => set({ showRoleManagement: show }),
 
   // Permission functions
   canCreateActivity: () => {
@@ -38,6 +40,14 @@ const useStore = create((set, get) => ({
       ["president", "vice_president", "treasurer", "senior_executive"].includes(
         profile.role,
       )
+    );
+  },
+
+  canManageRoles: () => {
+    const { profile } = get();
+    return (
+      profile &&
+      ["president", "vice_president", "treasurer"].includes(profile.role)
     );
   },
 
@@ -328,7 +338,75 @@ const useStore = create((set, get) => ({
       activeTab: "dashboard",
       showActivityForm: false,
       showContributionForm: false,
+      showRoleManagement: false,
     });
+  },
+
+  // Role management
+  updateUserRole: async (userId, newRole) => {
+    try {
+      console.log("Updating user role:", userId, "to", newRole);
+      const { profile } = get();
+
+      if (!profile || !get().canManageRoles()) {
+        throw new Error("You don't have permission to manage roles");
+      }
+
+      // Role hierarchy validation
+      const roleHierarchy = {
+        president: 5,
+        vice_president: 4,
+        treasurer: 3,
+        senior_executive: 2,
+        member: 1,
+      };
+
+      const currentUserLevel = roleHierarchy[profile.role] || 0;
+      const newRoleLevel = roleHierarchy[newRole] || 0;
+
+      // Only presidents can create other presidents
+      if (newRole === "president" && profile.role !== "president") {
+        throw new Error("Only presidents can assign the president role");
+      }
+
+      // Can't assign roles higher than your own
+      if (newRoleLevel > currentUserLevel) {
+        throw new Error("You cannot assign roles higher than your own");
+      }
+
+      const { data, error } = await supabase
+        .from("profiles")
+        .update({
+          role: newRole,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", userId)
+        .select()
+        .single();
+
+      if (error) throw error;
+
+      // Update the users array in state
+      set((state) => ({
+        users: state.users.map((user) =>
+          user.id === userId ? { ...user, role: newRole } : user,
+        ),
+        showRoleManagement: false,
+      }));
+
+      const updatedUser = get().users.find((u) => u.id === userId);
+      toast.success(
+        `Successfully updated ${updatedUser?.username || "user"}'s role to ${newRole.replace("_", " ")}`,
+      );
+
+      console.log("Role updated:", data);
+      return { data, error: null };
+    } catch (error) {
+      console.error("Error updating user role:", error);
+      const message = handleSupabaseError(error);
+      toast.error(message);
+      return { data: null, error: message };
+    }
   },
 }));
 

@@ -10,12 +10,14 @@ import {
   Calendar,
   FileText,
   AlertCircle,
+  Shield,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import useStore from "../store/useStore";
 import ActivityForm from "./ActivityForm";
 import ContributionForm from "./ContributionForm";
 import Leaderboard from "./Leaderboard";
+import RoleManagement from "./RoleManagement";
 
 const Dashboard = ({ session }) => {
   const [loading, setLoading] = useState(true);
@@ -30,13 +32,17 @@ const Dashboard = ({ session }) => {
     activeTab,
     showActivityForm,
     showContributionForm,
+    showRoleManagement,
     setActiveTab,
     setShowActivityForm,
     setShowContributionForm,
+    setShowRoleManagement,
     canCreateActivity,
     canCreateContribution,
+    canManageRoles,
     createActivity,
     createContribution,
+    updateUserRole,
     fetchProfile,
     fetchUsers,
     fetchActivities,
@@ -431,7 +437,18 @@ const Dashboard = ({ session }) => {
 
         {activeTab === "members" && (
           <div>
-            <h2 className="text-2xl font-bold mb-6">Members</h2>
+            <div className="flex justify-between items-center mb-6">
+              <h2 className="text-2xl font-bold">Members</h2>
+              {canManageRoles() && (
+                <button
+                  onClick={() => setShowRoleManagement(true)}
+                  className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 flex items-center"
+                >
+                  <Shield className="w-4 h-4 mr-2" />
+                  Manage Roles
+                </button>
+              )}
+            </div>
             <div className="bg-white rounded-lg shadow overflow-hidden">
               {users.length === 0 ? (
                 <div className="text-center py-8">
@@ -557,6 +574,14 @@ const Dashboard = ({ session }) => {
         currentUser={displayProfile}
         users={users}
         activities={activities}
+      />
+
+      <RoleManagement
+        isOpen={showRoleManagement}
+        onClose={() => setShowRoleManagement(false)}
+        currentUser={displayProfile}
+        users={users}
+        onUpdateRole={updateUserRole}
       />
     </div>
   );
