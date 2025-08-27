@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useState, useEffect } from "react";
 import {
   User,
   Plus,
@@ -11,6 +11,14 @@ import {
   FileText,
   AlertCircle,
   Shield,
+  Edit,
+  Trash2,
+  UserPlus,
+  UserMinus,
+  Download,
+  BarChart3,
+  TrendingUp,
+  Star,
 } from "lucide-react";
 import { supabase } from "../lib/supabase";
 import useStore from "../store/useStore";
@@ -18,11 +26,18 @@ import ActivityForm from "./ActivityForm";
 import ContributionForm from "./ContributionForm";
 import Leaderboard from "./Leaderboard";
 import RoleManagement from "./RoleManagement";
+import Notifications from "./Notifications";
+import ActivityRegistration from "./ActivityRegistration";
+import AnalyticsDashboard from "./AnalyticsDashboard";
 
 const Dashboard = ({ session }) => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [showProfileSetup, setShowProfileSetup] = useState(false);
+  const [selectedActivity, setSelectedActivity] = useState(null);
+  const [showActivityRegistration, setShowActivityRegistration] =
+    useState(false);
+  const [showAnalytics, setShowAnalytics] = useState(false);
 
   const {
     profile,
@@ -40,38 +55,42 @@ const Dashboard = ({ session }) => {
     canCreateActivity,
     canCreateContribution,
     canManageRoles,
+    canEditActivity,
+    canDeleteActivity,
     createActivity,
     createContribution,
+    updateActivity,
+    deleteActivity,
     updateUserRole,
     fetchProfile,
     fetchUsers,
     fetchActivities,
     fetchContributions,
     createProfile,
+    exportData,
+    getDetailedAnalytics,
+    registerForActivity,
+    unregisterFromActivity,
+    setupRealTimeSubscriptions,
+    cleanupRealTimeSubscriptions,
   } = useStore();
 
   // Load data when Dashboard mounts
   useEffect(() => {
     const loadData = async () => {
       if (!session?.user?.id) {
-        console.error("No user session found");
         setError("No user session found");
         setLoading(false);
         return;
       }
 
-      console.log("Loading dashboard data for user:", session.user.id);
       setLoading(true);
       setError(null);
 
       try {
-        // Try to fetch profile first
-        console.log("Fetching profile...");
         const profileResult = await fetchProfile(session.user.id);
 
         if (!profileResult) {
-          // Profile doesn't exist, try to create one
-          console.log("Profile not found, attempting to create...");
           try {
             const userData = {
               username:
@@ -82,39 +101,17 @@ const Dashboard = ({ session }) => {
             };
 
             await createProfile(session.user.id, userData);
-            console.log("Profile created successfully");
           } catch (createError) {
-            console.error("Failed to create profile:", createError);
             setShowProfileSetup(true);
           }
         }
 
-        // Fetch other data in parallel
-        console.log("Fetching other data...");
-        const [usersResult, activitiesResult, contributionsResult] =
-          await Promise.allSettled([
-            fetchUsers(),
-            fetchActivities(),
-            fetchContributions(),
-          ]);
-
-        // Log results for debugging
-        if (usersResult.status === "rejected") {
-          console.error("Failed to fetch users:", usersResult.reason);
-        }
-        if (activitiesResult.status === "rejected") {
-          console.error("Failed to fetch activities:", activitiesResult.reason);
-        }
-        if (contributionsResult.status === "rejected") {
-          console.error(
-            "Failed to fetch contributions:",
-            contributionsResult.reason,
-          );
-        }
-
-        console.log("Dashboard data loading completed");
+        await Promise.allSettled([
+          fetchUsers(),
+          fetchActivities(),
+          fetchContributions(),
+        ]);
       } catch (error) {
-        console.error("Error loading dashboard data:", error);
         setError(`Failed to load dashboard: ${error.message}`);
       } finally {
         setLoading(false);
@@ -122,10 +119,18 @@ const Dashboard = ({ session }) => {
     };
 
     loadData();
+
+    // Setup real-time subscriptions
+    const subscriptions = setupRealTimeSubscriptions();
+
+    return () => {
+      cleanupRealTimeSubscriptions();
+    };
   }, [session?.user?.id]);
 
   const signOut = async () => {
     try {
+      cleanupRealTimeSubscriptions();
       await supabase.auth.signOut();
     } catch (error) {
       console.error("Error signing out:", error);
@@ -141,8 +146,28 @@ const Dashboard = ({ session }) => {
     }
   };
 
+  const handleEditActivity = (activity) => {
+    // Set selected activity for editing and open form
+    // You'll need to modify ActivityForm to handle editing
+    setSelectedActivity(activity);
+    setShowActivityForm(true);
+  };
+
+  const handleDeleteActivity = async (activity) => {
+    if (
+      window.confirm(`Are you sure you want to delete "${activity.title}"?`)
+    ) {
+      await deleteActivity(activity.id);
+    }
+  };
+
+  const handleExport = async (type) => {
+    await exportData(type);
+  };
+
   const getRoleDisplayName = (role) => {
     const roleMap = {
+      admin: "Administrator",
       president: "President",
       vice_president: "Vice President",
       treasurer: "Treasurer",
@@ -154,32 +179,32 @@ const Dashboard = ({ session }) => {
 
   const getLevelColor = (level) => {
     const colors = {
-      Bronze: "text-amber-600 bg-amber-50",
-      Silver: "text-gray-600 bg-gray-50",
-      Gold: "text-yellow-600 bg-yellow-50",
-      Platinum: "text-purple-600 bg-purple-50",
+      Bronze: "text-amber-600 bg-amber-50 border-amber-200",
+      Silver: "text-gray-600 bg-gray-50 border-gray-200",
+      Gold: "text-yellow-600 bg-yellow-50 border-yellow-200",
+      Platinum: "text-purple-600 bg-purple-50 border-purple-200",
     };
-    return colors[level] || "text-gray-600 bg-gray-50";
+    return colors[level] || "text-gray-600 bg-gray-50 border-gray-200";
   };
 
-  // Profile Setup Component
-  const ProfileSetup = () => {
-    const [setupData, setSetupData] = useState({
-      username: session.user.email?.split("@")[0] || "",
-      fullName: "",
-    });
-    const [isSubmitting, setIsSubmitting] = useState(false);
+  const getUpcomingActivities = () => {
+    const today = new Date();
+    return activities
+      .filter((activity) => new Date(activity.date) >= today)
+      .sort((a, b) => new Date(a.date) - new Date(b.date))
+      .slice(0, 5);
+  };
 
-    const handleSubmit = async (e) => {
-      e.preventDefault();
-      setIsSubmitting(true);
-      try {
-        await handleProfileSetup(setupData);
-      } finally {
-        setIsSubmitting(false);
-      }
-    };
+  const getRecentContributions = () => {
+    return contributions
+      .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+      .slice(0, 5);
+  };
 
+  const analytics = getDetailedAnalytics();
+
+  // Show profile setup if needed
+  if (showProfileSetup) {
     return (
       <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
         <div className="bg-white rounded-lg shadow-lg p-8 w-full max-w-md">
@@ -192,56 +217,42 @@ const Dashboard = ({ session }) => {
               Complete your club profile to continue
             </p>
           </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Username
-              </label>
-              <input
-                type="text"
-                value={setupData.username}
-                onChange={(e) =>
-                  setSetupData({ ...setupData, username: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-                required
-              />
-            </div>
-
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Full Name (Optional)
-              </label>
-              <input
-                type="text"
-                value={setupData.fullName}
-                onChange={(e) =>
-                  setSetupData({ ...setupData, fullName: e.target.value })
-                }
-                className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </div>
-
+          <form
+            onSubmit={(e) => {
+              e.preventDefault();
+              const formData = new FormData(e.target);
+              handleProfileSetup({
+                username: formData.get("username"),
+                fullName: formData.get("fullName"),
+              });
+            }}
+            className="space-y-4"
+          >
+            <input
+              name="username"
+              type="text"
+              placeholder="Username"
+              required
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <input
+              name="fullName"
+              type="text"
+              placeholder="Full Name (Optional)"
+              className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
             <button
               type="submit"
-              disabled={isSubmitting || !setupData.username}
-              className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition duration-200 disabled:opacity-50"
+              className="w-full py-2 px-4 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition duration-200"
             >
-              {isSubmitting ? "Setting up..." : "Complete Setup"}
+              Complete Setup
             </button>
           </form>
         </div>
       </div>
     );
-  };
-
-  // Show profile setup if needed
-  if (showProfileSetup) {
-    return <ProfileSetup />;
   }
 
-  // Show error state
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center">
@@ -261,22 +272,18 @@ const Dashboard = ({ session }) => {
     );
   }
 
-  // Show loading state only if still loading
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <div className="text-center">
-          <div className="text-lg mb-2">Setting up dashboard...</div>
-          <div className="text-sm text-gray-500">Loading your data...</div>
-          <div className="mt-4">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto"></div>
-          </div>
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <div className="text-lg mb-2">Loading Dashboard...</div>
+          <div className="text-sm text-gray-500">Please wait...</div>
         </div>
       </div>
     );
   }
 
-  // Show dashboard even if profile is null (fallback)
   const displayProfile = profile || {
     username: session.user.email?.split("@")[0] || "User",
     role: "member",
@@ -294,13 +301,21 @@ const Dashboard = ({ session }) => {
               <h1 className="text-xl font-bold text-gray-900">CodeChef ASEB</h1>
             </div>
             <div className="flex items-center space-x-4">
-              <span className="text-sm text-gray-600">
-                Welcome, {displayProfile.username} (
-                {getRoleDisplayName(displayProfile.role)})
-              </span>
+              <Notifications />
+              <div className="flex items-center space-x-2">
+                <span className="text-sm text-gray-600">
+                  {displayProfile.username} (
+                  {getRoleDisplayName(displayProfile.role)})
+                </span>
+                <span
+                  className={`px-2 py-1 rounded-full text-xs font-medium border ${getLevelColor(displayProfile.level)}`}
+                >
+                  {displayProfile.level}
+                </span>
+              </div>
               <button
                 onClick={signOut}
-                className="flex items-center text-sm text-red-600 hover:text-red-800"
+                className="flex items-center text-sm text-red-600 hover:text-red-800 transition-colors"
               >
                 <LogOut className="w-4 h-4 mr-1" />
                 Logout
@@ -315,31 +330,31 @@ const Dashboard = ({ session }) => {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex space-x-8">
             {[
-              "dashboard",
-              "activities",
-              "members",
-              "contributions",
-              "leaderboard",
-            ].map((tab) => (
-              <button
-                key={tab}
-                onClick={() => setActiveTab(tab)}
-                className={`py-4 px-1 border-b-2 font-medium text-sm ${
-                  activeTab === tab
-                    ? "border-blue-500 text-blue-600"
-                    : "border-transparent text-gray-500 hover:text-gray-700"
-                }`}
-              >
-                {tab === "leaderboard" ? (
-                  <span className="flex items-center">
-                    <Trophy className="w-4 h-4 mr-1" />
-                    Leaderboard
-                  </span>
-                ) : (
-                  tab.charAt(0).toUpperCase() + tab.slice(1)
-                )}
-              </button>
-            ))}
+              { key: "dashboard", label: "Dashboard", icon: null },
+              { key: "activities", label: "Activities", icon: Calendar },
+              { key: "members", label: "Members", icon: Users },
+              { key: "contributions", label: "Contributions", icon: FileText },
+              { key: "leaderboard", label: "Leaderboard", icon: Trophy },
+              ...(profile?.role === "admin" || profile?.role === "president"
+                ? [{ key: "analytics", label: "Analytics", icon: BarChart3 }]
+                : []),
+            ].map((tab) => {
+              const IconComponent = tab.icon;
+              return (
+                <button
+                  key={tab.key}
+                  onClick={() => setActiveTab(tab.key)}
+                  className={`py-4 px-1 border-b-2 font-medium text-sm flex items-center ${
+                    activeTab === tab.key
+                      ? "border-blue-500 text-blue-600"
+                      : "border-transparent text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  {IconComponent && <IconComponent className="w-4 h-4 mr-1" />}
+                  {tab.label}
+                </button>
+              );
+            })}
           </div>
         </div>
       </nav>
@@ -347,50 +362,141 @@ const Dashboard = ({ session }) => {
       {/* Main Content */}
       <main className="max-w-7xl mx-auto py-6 px-4 sm:px-6 lg:px-8">
         {activeTab === "dashboard" && (
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-            <div className="bg-white p-6 rounded-lg shadow">
-              <div className="flex items-center">
-                <Award className="w-8 h-8 text-blue-600 mr-3" />
-                <div>
-                  <h3 className="text-lg font-medium">Your Points</h3>
-                  <p className="text-3xl font-bold text-blue-600">
-                    {displayProfile.points}
-                  </p>
+          <div className="space-y-6">
+            {/* Stats Grid */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+              <div className="bg-white p-6 rounded-lg shadow">
+                <div className="flex items-center">
+                  <Award className="w-8 h-8 text-blue-600 mr-3" />
+                  <div>
+                    <h3 className="text-lg font-medium">Your Points</h3>
+                    <p className="text-3xl font-bold text-blue-600">
+                      {displayProfile.points}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white p-6 rounded-lg shadow">
+                <div className="flex items-center">
+                  <Trophy className="w-8 h-8 text-purple-600 mr-3" />
+                  <div>
+                    <h3 className="text-lg font-medium">Your Level</h3>
+                    <span
+                      className={`px-3 py-1 rounded-full ${getLevelColor(displayProfile.level)}`}
+                    >
+                      {displayProfile.level}
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white p-6 rounded-lg shadow">
+                <div className="flex items-center">
+                  <Activity className="w-8 h-8 text-green-600 mr-3" />
+                  <div>
+                    <h3 className="text-lg font-medium">Total Activities</h3>
+                    <p className="text-3xl font-bold text-green-600">
+                      {activities.length}
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div className="bg-white p-6 rounded-lg shadow">
+                <div className="flex items-center">
+                  <Users className="w-8 h-8 text-orange-600 mr-3" />
+                  <div>
+                    <h3 className="text-lg font-medium">Total Members</h3>
+                    <p className="text-3xl font-bold text-orange-600">
+                      {users.length}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
-            <div className="bg-white p-6 rounded-lg shadow">
-              <div className="flex items-center">
-                <Trophy className="w-8 h-8 text-purple-600 mr-3" />
-                <div>
-                  <h3 className="text-lg font-medium">Your Level</h3>
-                  <span
-                    className={`px-3 py-1 rounded-full ${getLevelColor(displayProfile.level)}`}
-                  >
-                    {displayProfile.level}
-                  </span>
+
+            {/* Recent Activity & Upcoming Events */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Upcoming Activities */}
+              <div className="bg-white rounded-lg shadow">
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold">Upcoming Activities</h3>
+                </div>
+                <div className="p-6">
+                  {getUpcomingActivities().length === 0 ? (
+                    <div className="text-center py-4 text-gray-500">
+                      <Calendar className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                      <p>No upcoming activities</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {getUpcomingActivities().map((activity) => (
+                        <div
+                          key={activity.id}
+                          className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                        >
+                          <div>
+                            <h4 className="font-medium text-gray-900">
+                              {activity.title}
+                            </h4>
+                            <p className="text-sm text-gray-600">
+                              {activity.date}
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => {
+                              setSelectedActivity(activity);
+                              setShowActivityRegistration(true);
+                            }}
+                            className="text-blue-600 hover:text-blue-800 text-sm"
+                          >
+                            View
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               </div>
-            </div>
-            <div className="bg-white p-6 rounded-lg shadow">
-              <div className="flex items-center">
-                <Activity className="w-8 h-8 text-green-600 mr-3" />
-                <div>
-                  <h3 className="text-lg font-medium">Total Activities</h3>
-                  <p className="text-3xl font-bold text-green-600">
-                    {activities.length}
-                  </p>
+
+              {/* Recent Contributions */}
+              <div className="bg-white rounded-lg shadow">
+                <div className="p-6 border-b border-gray-200">
+                  <h3 className="text-lg font-semibold">
+                    Recent Contributions
+                  </h3>
                 </div>
-              </div>
-            </div>
-            <div className="bg-white p-6 rounded-lg shadow">
-              <div className="flex items-center">
-                <Users className="w-8 h-8 text-orange-600 mr-3" />
-                <div>
-                  <h3 className="text-lg font-medium">Total Members</h3>
-                  <p className="text-3xl font-bold text-orange-600">
-                    {users.length}
-                  </p>
+                <div className="p-6">
+                  {getRecentContributions().length === 0 ? (
+                    <div className="text-center py-4 text-gray-500">
+                      <Star className="w-8 h-8 mx-auto mb-2 text-gray-300" />
+                      <p>No recent contributions</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      {getRecentContributions().map((contribution) => {
+                        const member = users.find(
+                          (u) => u.id === contribution.member_id,
+                        );
+                        return (
+                          <div
+                            key={contribution.id}
+                            className="flex items-center justify-between p-3 bg-gray-50 rounded-lg"
+                          >
+                            <div>
+                              <h4 className="font-medium text-gray-900">
+                                {member?.username || "Unknown"}
+                              </h4>
+                              <p className="text-sm text-gray-600">
+                                {contribution.description}
+                              </p>
+                            </div>
+                            <span className="text-green-600 font-semibold">
+                              +{contribution.points}
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               </div>
             </div>
@@ -401,19 +507,28 @@ const Dashboard = ({ session }) => {
           <div>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold">Activities</h2>
-              {canCreateActivity() && (
+              <div className="flex space-x-2">
+                {canCreateActivity() && (
+                  <button
+                    onClick={() => setShowActivityForm(true)}
+                    className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Create Activity
+                  </button>
+                )}
                 <button
-                  onClick={() => setShowActivityForm(true)}
-                  className="bg-blue-600 text-white px-4 py-2 rounded-md hover:bg-blue-700 flex items-center"
+                  onClick={() => handleExport("activities")}
+                  className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center"
                 >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Create Activity
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
                 </button>
-              )}
+              </div>
             </div>
-            <div className="space-y-4">
+            <div className="grid gap-4">
               {activities.length === 0 ? (
-                <div className="text-center py-8">
+                <div className="text-center py-12 bg-white rounded-lg shadow">
                   <Activity className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-500">No activities found</p>
                 </div>
@@ -421,13 +536,58 @@ const Dashboard = ({ session }) => {
                 activities.map((activity) => (
                   <div
                     key={activity.id}
-                    className="bg-white p-6 rounded-lg shadow"
+                    className="bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow"
                   >
-                    <h3 className="text-lg font-medium">{activity.title}</h3>
-                    <p className="text-gray-600">{activity.description}</p>
-                    <p className="text-sm text-gray-500 mt-2">
-                      {activity.date}
-                    </p>
+                    <div className="flex justify-between items-start">
+                      <div className="flex-1">
+                        <h3 className="text-lg font-medium text-gray-900">
+                          {activity.title}
+                        </h3>
+                        <p className="text-gray-600 mt-1">
+                          {activity.description}
+                        </p>
+                        <div className="flex items-center mt-3 space-x-4 text-sm text-gray-500">
+                          <span className="flex items-center">
+                            <Calendar className="w-4 h-4 mr-1" />
+                            {activity.date}
+                          </span>
+                          <span className="capitalize">{activity.type}</span>
+                          {activity.max_participants && (
+                            <span>Max: {activity.max_participants}</span>
+                          )}
+                        </div>
+                      </div>
+                      <div className="flex items-center space-x-2 ml-4">
+                        <button
+                          onClick={() => {
+                            setSelectedActivity(activity);
+                            setShowActivityRegistration(true);
+                          }}
+                          className="text-blue-600 hover:text-blue-800 p-1"
+                          title="View Details"
+                        >
+                          <Users className="w-4 h-4" />
+                        </button>
+                        {canEditActivity(activity) && (
+                          <button
+                            onClick={() => handleEditActivity(activity)}
+                            className="text-gray-600 hover:text-gray-800 p-1"
+                            title="Edit"
+                          >
+                            <Edit className="w-4 h-4" />
+                          </button>
+                        )}
+                        {canDeleteActivity(activity) && (
+                          <button
+                            onClick={() => handleDeleteActivity(activity)}
+                            className="text-red-600 hover:text-red-800 p-1"
+                            title="Delete"
+                          >
+                            <Trash2 className="w-4 h-4" />
+                          </button>
+                        )}
+                      </div>
+                    </div>
                   </div>
                 ))
               )}
@@ -439,19 +599,28 @@ const Dashboard = ({ session }) => {
           <div>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold">Members</h2>
-              {canManageRoles() && (
+              <div className="flex space-x-2">
+                {canManageRoles() && (
+                  <button
+                    onClick={() => setShowRoleManagement(true)}
+                    className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 flex items-center"
+                  >
+                    <Shield className="w-4 h-4 mr-2" />
+                    Manage Roles
+                  </button>
+                )}
                 <button
-                  onClick={() => setShowRoleManagement(true)}
-                  className="bg-purple-600 text-white px-4 py-2 rounded-md hover:bg-purple-700 flex items-center"
+                  onClick={() => handleExport("users")}
+                  className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center"
                 >
-                  <Shield className="w-4 h-4 mr-2" />
-                  Manage Roles
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
                 </button>
-              )}
+              </div>
             </div>
             <div className="bg-white rounded-lg shadow overflow-hidden">
               {users.length === 0 ? (
-                <div className="text-center py-8">
+                <div className="text-center py-12">
                   <Users className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-500">No members found</p>
                 </div>
@@ -460,16 +629,23 @@ const Dashboard = ({ session }) => {
                   {users.map((user) => (
                     <div
                       key={user.id}
-                      className="px-6 py-4 flex items-center justify-between"
+                      className="px-6 py-4 flex items-center justify-between hover:bg-gray-50"
                     >
                       <div className="flex items-center space-x-4">
-                        <div className="h-10 w-10 rounded-full bg-gray-300 flex items-center justify-center">
-                          <User className="h-5 w-5 text-gray-600" />
+                        <div className="h-10 w-10 rounded-full bg-gradient-to-r from-blue-500 to-purple-600 flex items-center justify-center">
+                          <span className="text-white font-semibold">
+                            {user.username.charAt(0).toUpperCase()}
+                          </span>
                         </div>
                         <div>
                           <p className="text-lg font-medium text-gray-900">
                             {user.username}
                           </p>
+                          {user.full_name && (
+                            <p className="text-sm text-gray-600">
+                              {user.full_name}
+                            </p>
+                          )}
                           <p className="text-sm text-gray-500">
                             {getRoleDisplayName(user.role)}
                           </p>
@@ -477,7 +653,7 @@ const Dashboard = ({ session }) => {
                       </div>
                       <div className="flex items-center space-x-4">
                         <span
-                          className={`px-2 py-1 rounded-full text-sm font-medium ${getLevelColor(user.level)}`}
+                          className={`px-3 py-1 rounded-full text-sm font-medium border ${getLevelColor(user.level)}`}
                         >
                           {user.level}
                         </span>
@@ -500,19 +676,28 @@ const Dashboard = ({ session }) => {
           <div>
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-2xl font-bold">Contributions</h2>
-              {canCreateContribution() && (
+              <div className="flex space-x-2">
+                {canCreateContribution() && (
+                  <button
+                    onClick={() => setShowContributionForm(true)}
+                    className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 flex items-center"
+                  >
+                    <Plus className="w-4 h-4 mr-2" />
+                    Record Contribution
+                  </button>
+                )}
                 <button
-                  onClick={() => setShowContributionForm(true)}
-                  className="bg-green-600 text-white px-4 py-2 rounded-md hover:bg-green-700 flex items-center"
+                  onClick={() => handleExport("contributions")}
+                  className="bg-gray-600 text-white px-4 py-2 rounded-md hover:bg-gray-700 flex items-center"
                 >
-                  <Plus className="w-4 h-4 mr-2" />
-                  Record Contribution
+                  <Download className="w-4 h-4 mr-2" />
+                  Export
                 </button>
-              )}
+              </div>
             </div>
             <div className="space-y-4">
               {contributions.length === 0 ? (
-                <div className="text-center py-8">
+                <div className="text-center py-12 bg-white rounded-lg shadow">
                   <FileText className="w-12 h-12 text-gray-400 mx-auto mb-4" />
                   <p className="text-gray-500">No contributions recorded</p>
                 </div>
@@ -524,28 +709,35 @@ const Dashboard = ({ session }) => {
                   return (
                     <div
                       key={contribution.id}
-                      className="bg-white p-6 rounded-lg shadow"
+                      className="bg-white p-6 rounded-lg shadow hover:shadow-md transition-shadow"
                     >
                       <div className="flex justify-between items-start mb-2">
                         <div>
                           <h3 className="text-lg font-medium text-gray-900">
                             {member?.username || "Unknown Member"}
                           </h3>
-                          <p className="text-gray-600">
+                          <p className="text-gray-600 mt-1">
                             {contribution.description}
                           </p>
                         </div>
-                        <div className="text-right">
-                          <span className="inline-flex items-center px-2 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
-                            +{contribution.points} points
-                          </span>
-                        </div>
+                        <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium bg-green-100 text-green-800">
+                          +{contribution.points} points
+                        </span>
                       </div>
                       <div className="flex items-center justify-between text-sm text-gray-500">
+                        <div className="flex items-center space-x-4">
+                          <span className="capitalize">
+                            {contribution.contribution_type?.replace("_", " ")}
+                          </span>
+                          <span>{contribution.date}</span>
+                          {contribution.activity && (
+                            <span>Activity: {contribution.activity.title}</span>
+                          )}
+                        </div>
                         <span>
-                          {contribution.contribution_type?.replace("_", " ")}
+                          Recorded by:{" "}
+                          {contribution.recorded_by?.username || "Unknown"}
                         </span>
-                        <span>{contribution.date}</span>
                       </div>
                     </div>
                   );
@@ -558,13 +750,28 @@ const Dashboard = ({ session }) => {
         {activeTab === "leaderboard" && (
           <Leaderboard users={users} contributions={contributions} />
         )}
+
+        {activeTab === "analytics" &&
+          (profile?.role === "admin" || profile?.role === "president") && (
+            <AnalyticsDashboard analytics={analytics} />
+          )}
       </main>
 
-      {/* Forms */}
+      {/* Modals and Forms */}
       <ActivityForm
         isOpen={showActivityForm}
-        onClose={() => setShowActivityForm(false)}
-        onSubmit={(data) => createActivity(data, session.user.id)}
+        onClose={() => {
+          setShowActivityForm(false);
+          setSelectedActivity(null);
+        }}
+        onSubmit={(data) => {
+          if (selectedActivity) {
+            return updateActivity(selectedActivity.id, data);
+          } else {
+            return createActivity(data, session.user.id);
+          }
+        }}
+        initialData={selectedActivity}
       />
 
       <ContributionForm
@@ -582,6 +789,18 @@ const Dashboard = ({ session }) => {
         currentUser={displayProfile}
         users={users}
         onUpdateRole={updateUserRole}
+      />
+
+      <ActivityRegistration
+        isOpen={showActivityRegistration}
+        onClose={() => {
+          setShowActivityRegistration(false);
+          setSelectedActivity(null);
+        }}
+        activity={selectedActivity}
+        currentUser={displayProfile}
+        onRegister={registerForActivity}
+        onUnregister={unregisterFromActivity}
       />
     </div>
   );
