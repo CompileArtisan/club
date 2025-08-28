@@ -670,6 +670,8 @@ const useStore = create((set, get) => ({
   },
 
   // Role management with admin support
+  // Replace the updateUserRole function in your useStore.js with this corrected version:
+
   updateUserRole: async (userId, newRole) => {
     try {
       console.log("Updating user role:", userId, "to", newRole);
@@ -696,18 +698,29 @@ const useStore = create((set, get) => ({
       const targetUserLevel = roleHierarchy[targetUser.role] || 0;
       const newRoleLevel = roleHierarchy[newRole] || 0;
 
-      // Admin can do anything
+      // FIXED: Admin can assign any role (including president)
       if (profile.role === "admin") {
-        // Admin can promote/demote anyone
+        // Admin can promote/demote anyone to any role except admin
+        if (newRole === "admin") {
+          throw new Error("Only super-admin can assign admin role");
+        }
+        // Admin can assign president role - remove the restriction
       } else {
+        // Non-admin role restrictions
+
         // Only admins can create other admins
         if (newRole === "admin") {
           throw new Error("Only admins can assign the admin role");
         }
 
-        // Only presidents can create other presidents
-        if (newRole === "president" && profile.role !== "president") {
-          throw new Error("Only presidents can assign the president role");
+        // Only presidents and admins can create other presidents
+        if (
+          newRole === "president" &&
+          !["admin", "president"].includes(profile.role)
+        ) {
+          throw new Error(
+            "Only presidents and admins can assign the president role",
+          );
         }
 
         // Can't manage users at your level or higher
@@ -715,7 +728,7 @@ const useStore = create((set, get) => ({
           throw new Error("You cannot manage users at your level or higher");
         }
 
-        // Can't assign roles higher than your own
+        // Can't assign roles higher than your own (except admin can do anything)
         if (newRoleLevel >= currentUserLevel) {
           throw new Error("You cannot assign roles at your level or higher");
         }
