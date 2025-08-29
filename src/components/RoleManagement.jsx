@@ -1,9 +1,9 @@
 import React, { useState, useEffect } from "react";
 import { Users, Shield, Crown, DollarSign, Star, User, X } from "lucide-react";
-import { useStore } from "../store/useStore";
+import useStore from "../store/useStore"; // Fixed import (default export)
 
 const RoleManagement = ({ isOpen, onClose, session }) => {
-  const { members, updateUserRole, fetchMembers } = useStore();
+  const { users, updateUserRole, fetchUsers } = useStore(); // Changed from 'members' to 'users'
   const [selectedUser, setSelectedUser] = useState(null);
   const [newRole, setNewRole] = useState("");
   const [loading, setLoading] = useState(false);
@@ -38,13 +38,16 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
 
   useEffect(() => {
     if (isOpen) {
-      fetchMembers();
+      fetchUsers(); // Changed from fetchMembers to fetchUsers
     }
-  }, [isOpen, fetchMembers]);
+  }, [isOpen, fetchUsers]);
 
   // Get current user's role
-  const currentUser = members.find((m) => m.id === session?.user?.id);
+  const currentUser = users.find((m) => m.id === session?.user?.id); // Changed from 'members' to 'users'
   const currentUserRole = currentUser?.role || "member";
+
+  console.log("DEBUG: Current user role:", currentUserRole);
+  console.log("DEBUG: All users:", users);
 
   // Fixed: Proper role management logic
   const canManageRole = (managerRole, targetRole) => {
@@ -61,37 +64,42 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
   };
 
   // Fixed: Show users that can be managed
-  const filteredMembers = members.filter((member) => {
+  const filteredMembers = users.filter((user) => {
+    // Changed from 'members' to 'users'
     // Don't show the current user in the management list
-    if (member.id === session?.user?.id) return false;
+    if (user.id === session?.user?.id) return false;
 
-    // Show members that the current user can manage
-    return canManageRole(currentUserRole, member.role);
+    // Show users that the current user can manage
+    return canManageRole(currentUserRole, user.role);
   });
 
-  // Fixed: Get available roles for assignment
+  // SIMPLIFIED: Get available roles for assignment
   const getAvailableRoles = (currentUserRole) => {
+    console.log("DEBUG: Getting available roles for:", currentUserRole);
+
     const allRoles = [
       { value: "member", label: "Member" },
       { value: "senior_executive", label: "Senior Executive" },
       { value: "treasurer", label: "Treasurer" },
       { value: "vice_president", label: "Vice President" },
       { value: "president", label: "President" },
-      { value: "admin", label: "Administrator" },
     ];
 
-    // FIXED: Admin can assign ANY role except admin
+    // If admin, show ALL roles (except admin itself)
     if (currentUserRole === "admin") {
-      return allRoles.filter((role) => role.value !== "admin");
+      console.log("DEBUG: Admin detected, showing all roles");
+      return allRoles;
     }
 
-    // For non-admin roles, they can only assign roles below them
+    // For others, filter based on hierarchy
     const managerLevel = roleHierarchy[currentUserRole] || 0;
-
-    return allRoles.filter((role) => {
+    const availableRoles = allRoles.filter((role) => {
       const roleLevel = roleHierarchy[role.value] || 0;
       return roleLevel < managerLevel;
     });
+
+    console.log("DEBUG: Available roles:", availableRoles);
+    return availableRoles;
   };
 
   const handleRoleUpdate = async () => {
@@ -102,7 +110,7 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
       await updateUserRole(selectedUser.id, newRole);
       setSelectedUser(null);
       setNewRole("");
-      await fetchMembers(); // Refresh the list
+      await fetchUsers(); // Changed from fetchMembers to fetchUsers
     } catch (error) {
       console.error("Failed to update role:", error);
     } finally {
@@ -159,7 +167,7 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
                 No users available to manage
               </h3>
               <p className="text-gray-600">
-                {members.length <= 1
+                {users.length <= 1
                   ? "There are no other members in the system yet."
                   : "You can only manage users with lower roles than yours."}
               </p>
@@ -270,6 +278,10 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
                         </option>
                       ))}
                     </select>
+                    <p className="text-xs text-gray-500 mt-1">
+                      Available roles:{" "}
+                      {availableRoles.map((r) => r.label).join(", ")}
+                    </p>
                   </div>
 
                   <div className="flex space-x-3 pt-4">
