@@ -75,7 +75,6 @@ const Dashboard = ({ session }) => {
     cleanupRealTimeSubscriptions,
   } = useStore();
 
-  // Load data when Dashboard mounts
   useEffect(() => {
     const loadData = async () => {
       if (!session?.user?.id) {
@@ -88,7 +87,11 @@ const Dashboard = ({ session }) => {
       setError(null);
 
       try {
+        console.log("Loading data for user:", session.user.id);
+
+        // Fetch profile first and wait for it
         const profileResult = await fetchProfile(session.user.id);
+        console.log("Profile fetch result:", profileResult);
 
         if (!profileResult) {
           try {
@@ -99,19 +102,23 @@ const Dashboard = ({ session }) => {
                 "user",
               fullName: session.user.user_metadata?.full_name || "",
             };
-
             await createProfile(session.user.id, userData);
+            // Refetch the profile after creation
+            await fetchProfile(session.user.id);
           } catch (createError) {
+            console.error("Error creating profile:", createError);
             setShowProfileSetup(true);
           }
         }
 
+        // Load other data
         await Promise.allSettled([
           fetchUsers(),
           fetchActivities(),
           fetchContributions(),
         ]);
       } catch (error) {
+        console.error("Error loading dashboard:", error);
         setError(`Failed to load dashboard: ${error.message}`);
       } finally {
         setLoading(false);
@@ -120,9 +127,7 @@ const Dashboard = ({ session }) => {
 
     loadData();
 
-    // Setup real-time subscriptions
     const subscriptions = setupRealTimeSubscriptions();
-
     return () => {
       cleanupRealTimeSubscriptions();
     };
@@ -140,6 +145,7 @@ const Dashboard = ({ session }) => {
   const handleProfileSetup = async (setupData) => {
     try {
       await createProfile(session.user.id, setupData);
+      await fetchProfile(session.user.id); // Refetch after creation
       setShowProfileSetup(false);
     } catch (error) {
       console.error("Error setting up profile:", error);
@@ -147,8 +153,6 @@ const Dashboard = ({ session }) => {
   };
 
   const handleEditActivity = (activity) => {
-    // Set selected activity for editing and open form
-    // You'll need to modify ActivityForm to handle editing
     setSelectedActivity(activity);
     setShowActivityForm(true);
   };
@@ -284,12 +288,38 @@ const Dashboard = ({ session }) => {
     );
   }
 
-  const displayProfile = profile || {
-    username: session.user.email?.split("@")[0] || "User",
-    role: "member",
-    points: 0,
-    level: "Bronze",
-  };
+  // Don't use fallback - if profile is null, show an error
+  if (!profile) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <div className="text-center">
+          <AlertCircle className="w-12 h-12 text-red-600 mx-auto mb-4" />
+          <div className="text-lg mb-2 text-red-600">Profile Not Found</div>
+          <div className="text-sm text-gray-500 mb-4">
+            Your profile could not be loaded. This may be a synchronization
+            issue.
+          </div>
+          <button
+            onClick={() => {
+              setLoading(true);
+              fetchProfile(session.user.id).finally(() => setLoading(false));
+            }}
+            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 mr-2"
+          >
+            Retry
+          </button>
+          <button
+            onClick={() => setShowProfileSetup(true)}
+            className="px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700"
+          >
+            Setup Profile
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  console.log("Dashboard rendering with profile:", profile);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -304,13 +334,14 @@ const Dashboard = ({ session }) => {
               <Notifications />
               <div className="flex items-center space-x-2">
                 <span className="text-sm text-gray-600">
-                  {displayProfile.username} (
-                  {getRoleDisplayName(displayProfile.role)})
+                  {profile.username} ({getRoleDisplayName(profile.role)})
                 </span>
                 <span
-                  className={`px-2 py-1 rounded-full text-xs font-medium border ${getLevelColor(displayProfile.level)}`}
+                  className={`px-2 py-1 rounded-full text-xs font-medium border ${getLevelColor(
+                    profile.level,
+                  )}`}
                 >
-                  {displayProfile.level}
+                  {profile.level}
                 </span>
               </div>
               <button
@@ -371,24 +402,26 @@ const Dashboard = ({ session }) => {
                   <div>
                     <h3 className="text-lg font-medium">Your Points</h3>
                     <p className="text-3xl font-bold text-blue-600">
-                      {displayProfile.points}
+                      {profile.points}
                     </p>
                   </div>
                 </div>
               </div>
+
               <div className="bg-white p-6 rounded-lg shadow">
                 <div className="flex items-center">
                   <Trophy className="w-8 h-8 text-purple-600 mr-3" />
                   <div>
                     <h3 className="text-lg font-medium">Your Level</h3>
                     <span
-                      className={`px-3 py-1 rounded-full ${getLevelColor(displayProfile.level)}`}
+                      className={`px-3 py-1 rounded-full ${getLevelColor(profile.level)}`}
                     >
-                      {displayProfile.level}
+                      {profile.level}
                     </span>
                   </div>
                 </div>
               </div>
+
               <div className="bg-white p-6 rounded-lg shadow">
                 <div className="flex items-center">
                   <Activity className="w-8 h-8 text-green-600 mr-3" />
@@ -400,6 +433,7 @@ const Dashboard = ({ session }) => {
                   </div>
                 </div>
               </div>
+
               <div className="bg-white p-6 rounded-lg shadow">
                 <div className="flex items-center">
                   <Users className="w-8 h-8 text-orange-600 mr-3" />
@@ -526,6 +560,7 @@ const Dashboard = ({ session }) => {
                 </button>
               </div>
             </div>
+
             <div className="grid gap-4">
               {activities.length === 0 ? (
                 <div className="text-center py-12 bg-white rounded-lg shadow">
@@ -618,6 +653,7 @@ const Dashboard = ({ session }) => {
                 </button>
               </div>
             </div>
+
             <div className="bg-white rounded-lg shadow overflow-hidden">
               {users.length === 0 ? (
                 <div className="text-center py-12">
@@ -653,7 +689,9 @@ const Dashboard = ({ session }) => {
                       </div>
                       <div className="flex items-center space-x-4">
                         <span
-                          className={`px-3 py-1 rounded-full text-sm font-medium border ${getLevelColor(user.level)}`}
+                          className={`px-3 py-1 rounded-full text-sm font-medium border ${getLevelColor(
+                            user.level,
+                          )}`}
                         >
                           {user.level}
                         </span>
@@ -695,6 +733,7 @@ const Dashboard = ({ session }) => {
                 </button>
               </div>
             </div>
+
             <div className="space-y-4">
               {contributions.length === 0 ? (
                 <div className="text-center py-12 bg-white rounded-lg shadow">
@@ -778,7 +817,7 @@ const Dashboard = ({ session }) => {
         isOpen={showContributionForm}
         onClose={() => setShowContributionForm(false)}
         onSubmit={(data) => createContribution(data, session.user.id)}
-        currentUser={displayProfile}
+        currentUser={profile} // Use actual profile, not fallback
         users={users}
         activities={activities}
       />
@@ -786,7 +825,7 @@ const Dashboard = ({ session }) => {
       <RoleManagement
         isOpen={showRoleManagement}
         onClose={() => setShowRoleManagement(false)}
-        currentUser={displayProfile}
+        session={session} // Pass session instead of currentUser
         users={users}
         onUpdateRole={updateUserRole}
       />
@@ -798,7 +837,7 @@ const Dashboard = ({ session }) => {
           setSelectedActivity(null);
         }}
         activity={selectedActivity}
-        currentUser={displayProfile}
+        currentUser={profile} // Use actual profile
         onRegister={registerForActivity}
         onUnregister={unregisterFromActivity}
       />

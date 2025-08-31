@@ -16,33 +16,42 @@ const ContributionForm = ({
     points: 10,
     contribution_type: "participation",
   });
-
   const [isLoading, setIsLoading] = useState(false);
   const [eligibleUsers, setEligibleUsers] = useState([]);
 
-  // Define contribution hierarchy based on user role
   useEffect(() => {
     if (!currentUser || !users) return;
 
+    console.log("ContributionForm - Current user:", currentUser);
+    console.log("ContributionForm - Current user role:", currentUser.role);
+    console.log("ContributionForm - All users:", users);
+
     let eligible = [];
 
+    // Make sure we have a valid role
+    if (!currentUser.role) {
+      console.error("Current user has no role defined");
+      setEligibleUsers([]);
+      return;
+    }
+
     switch (currentUser.role) {
-      case "president":
-        // President can create contributions for anyone
+      case "admin":
+        // Admin can manage everyone except themselves
         eligible = users.filter((user) => user.id !== currentUser.id);
         break;
-
+      case "president":
+        // President can manage everyone except themselves
+        eligible = users.filter((user) => user.id !== currentUser.id);
+        break;
       case "vice_president":
-        // VP can create for treasurer, senior executives, and members
         eligible = users.filter(
           (user) =>
             user.id !== currentUser.id &&
             ["treasurer", "senior_executive", "member"].includes(user.role),
         );
         break;
-
       case "treasurer":
-        // Treasurer can create for VP, senior executives, and members
         eligible = users.filter(
           (user) =>
             user.id !== currentUser.id &&
@@ -51,18 +60,16 @@ const ContributionForm = ({
             ),
         );
         break;
-
       case "senior_executive":
-        // Senior executives can only create for members
         eligible = users.filter(
           (user) => user.id !== currentUser.id && user.role === "member",
         );
         break;
-
       default:
         eligible = [];
     }
 
+    console.log("ContributionForm - Eligible users:", eligible);
     setEligibleUsers(eligible);
   }, [currentUser, users]);
 
@@ -73,15 +80,12 @@ const ContributionForm = ({
     }
 
     setIsLoading(true);
-
     try {
       await onSubmit({
         ...formData,
         points: parseInt(formData.points),
         date: new Date().toISOString().split("T")[0],
       });
-
-      // Reset form
       setFormData({
         member_id: "",
         activity_id: "",
@@ -89,7 +93,6 @@ const ContributionForm = ({
         points: 10,
         contribution_type: "participation",
       });
-
       onClose();
     } catch (error) {
       console.error("Error creating contribution:", error);
@@ -122,6 +125,32 @@ const ContributionForm = ({
 
   if (!isOpen) return null;
 
+  // Show error if currentUser is not properly loaded
+  if (!currentUser) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+          <div className="text-center">
+            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              Profile Not Available
+            </h3>
+            <p className="text-gray-600 mb-4">
+              Your profile data is not loaded. Please refresh the page and try
+              again.
+            </p>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
       <div className="bg-white rounded-lg shadow-xl max-w-md w-full max-h-96 overflow-y-auto">
@@ -138,6 +167,20 @@ const ContributionForm = ({
         </div>
 
         <div className="p-6 space-y-4">
+          {/* Debug info */}
+          <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+            <h4 className="font-medium text-blue-900 mb-2">
+              Current User Info
+            </h4>
+            <p className="text-sm text-blue-800">
+              <strong>Username:</strong> {currentUser.username}
+              <br />
+              <strong>Role:</strong> {currentUser.role}
+              <br />
+              <strong>Eligible Users:</strong> {eligibleUsers.length}
+            </p>
+          </div>
+
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Member *
@@ -163,7 +206,8 @@ const ContributionForm = ({
             </div>
             {eligibleUsers.length === 0 && (
               <p className="text-sm text-gray-500 mt-1">
-                No eligible members based on your role permissions.
+                No eligible members based on your role permissions. Your role:{" "}
+                {currentUser.role}
               </p>
             )}
           </div>
@@ -265,7 +309,10 @@ const ContributionForm = ({
               type="button"
               onClick={handleSubmit}
               disabled={
-                isLoading || !formData.member_id || !formData.description
+                isLoading ||
+                !formData.member_id ||
+                !formData.description ||
+                eligibleUsers.length === 0
               }
               className="flex-1 px-4 py-2 bg-green-600 text-white rounded-md hover:bg-green-700 transition duration-200 disabled:opacity-50"
             >

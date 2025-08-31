@@ -29,39 +29,42 @@ const useStore = create((set, get) => ({
   // Permission functions with admin support
   canCreateActivity: () => {
     const { profile } = get();
-    return (
-      profile &&
-      [
-        "admin",
-        "president",
-        "vice_president",
-        "treasurer",
-        "senior_executive",
-      ].includes(profile.role)
-    );
+    if (!profile) {
+      console.warn("canCreateActivity: No profile loaded");
+      return false;
+    }
+    return [
+      "admin",
+      "president",
+      "vice_president",
+      "treasurer",
+      "senior_executive",
+    ].includes(profile.role);
   },
 
   canCreateContribution: () => {
     const { profile } = get();
-    return (
-      profile &&
-      [
-        "admin",
-        "president",
-        "vice_president",
-        "treasurer",
-        "senior_executive",
-      ].includes(profile.role)
-    );
+    if (!profile) {
+      console.warn("canCreateContribution: No profile loaded");
+      return false;
+    }
+    return [
+      "admin",
+      "president",
+      "vice_president",
+      "treasurer",
+      "senior_executive",
+    ].includes(profile.role);
   },
 
   canManageRoles: () => {
     const { profile } = get();
-    return (
-      profile &&
-      ["admin", "president", "vice_president", "treasurer"].includes(
-        profile.role,
-      )
+    if (!profile) {
+      console.warn("canManageRoles: No profile loaded");
+      return false;
+    }
+    return ["admin", "president", "vice_president", "treasurer"].includes(
+      profile.role,
     );
   },
 
@@ -166,8 +169,18 @@ const useStore = create((set, get) => ({
         throw error;
       }
 
-      console.log("Profile fetched:", data);
+      console.log("Profile fetched successfully:", data);
+
+      // Make sure we set the profile in the store
       set({ profile: data });
+
+      // Also update the users array if this profile is in there
+      set((state) => ({
+        users: state.users.map((user) =>
+          user.id === userId ? { ...user, ...data } : user,
+        ),
+      }));
+
       return data;
     } catch (error) {
       console.error("Error fetching profile:", error);
@@ -180,23 +193,22 @@ const useStore = create((set, get) => ({
     try {
       console.log("Creating profile for:", userId, userData);
 
+      const profileData = {
+        id: userId,
+        username: userData.username || "user",
+        full_name: userData.fullName || "",
+        role: "member", // Default role
+        points: 0,
+        level: "Bronze",
+      };
+
       const { data, error } = await supabase
         .from("profiles")
-        .insert([
-          {
-            id: userId,
-            username: userData.username || "user",
-            full_name: userData.fullName || "",
-            role: "member",
-            points: 0,
-            level: "Bronze",
-          },
-        ])
+        .insert([profileData])
         .select()
         .single();
 
       if (error) {
-        // Handle unique constraint violations
         if (error.code === "23505") {
           if (error.message.includes("username")) {
             throw new Error(
@@ -208,8 +220,16 @@ const useStore = create((set, get) => ({
         throw error;
       }
 
-      console.log("Profile created:", data);
+      console.log("Profile created successfully:", data);
+
+      // Set the profile in the store immediately
       set({ profile: data });
+
+      // Also add to users array
+      set((state) => ({
+        users: [data, ...state.users],
+      }));
+
       toast.success("Profile created successfully!");
       return data;
     } catch (error) {
@@ -675,16 +695,22 @@ const useStore = create((set, get) => ({
   updateUserRole: async (userId, newRole) => {
     try {
       console.log("Updating user role:", userId, "to", newRole);
+
       const { profile, users } = get();
 
-      if (!profile || !get().canManageRoles()) {
+      if (!profile) {
+        throw new Error("Your profile is not loaded. Please refresh the page.");
+      }
+
+      if (!get().canManageRoles()) {
         throw new Error("You don't have permission to manage roles");
       }
 
       const targetUser = users.find((u) => u.id === userId);
-      if (!targetUser) throw new Error("User not found");
+      if (!targetUser) {
+        throw new Error("User not found");
+      }
 
-      // Role hierarchy validation
       const roleHierarchy = {
         admin: 6,
         president: 5,
@@ -698,22 +724,15 @@ const useStore = create((set, get) => ({
       const targetUserLevel = roleHierarchy[targetUser.role] || 0;
       const newRoleLevel = roleHierarchy[newRole] || 0;
 
-      // FIXED: Admin can assign any role (including president)
+      // Role validation logic
       if (profile.role === "admin") {
-        // Admin can promote/demote anyone to any role except admin
         if (newRole === "admin") {
           throw new Error("Only super-admin can assign admin role");
         }
-        // Admin can assign president role - remove the restriction
       } else {
-        // Non-admin role restrictions
-
-        // Only admins can create other admins
         if (newRole === "admin") {
           throw new Error("Only admins can assign the admin role");
         }
-
-        // Only presidents and admins can create other presidents
         if (
           newRole === "president" &&
           !["admin", "president"].includes(profile.role)
@@ -722,13 +741,9 @@ const useStore = create((set, get) => ({
             "Only presidents and admins can assign the president role",
           );
         }
-
-        // Can't manage users at your level or higher
         if (targetUserLevel >= currentUserLevel) {
           throw new Error("You cannot manage users at your level or higher");
         }
-
-        // Can't assign roles higher than your own (except admin can do anything)
         if (newRoleLevel >= currentUserLevel) {
           throw new Error("You cannot assign roles at your level or higher");
         }
@@ -746,11 +761,16 @@ const useStore = create((set, get) => ({
 
       if (error) throw error;
 
-      // Update the users array in state
+      // Update both users array and profile if it's the current user
       set((state) => ({
         users: state.users.map((user) =>
           user.id === userId ? { ...user, role: newRole } : user,
         ),
+        // Update profile if this is the current user
+        profile:
+          state.profile?.id === userId
+            ? { ...state.profile, role: newRole }
+            : state.profile,
         showRoleManagement: false,
       }));
 
@@ -759,7 +779,7 @@ const useStore = create((set, get) => ({
         `Successfully updated ${updatedUser?.username || "user"}'s role to ${newRole.replace("_", " ")}`,
       );
 
-      console.log("Role updated:", data);
+      console.log("Role updated successfully:", data);
       return { data, error: null };
     } catch (error) {
       console.error("Error updating user role:", error);

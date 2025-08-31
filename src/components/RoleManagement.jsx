@@ -1,14 +1,13 @@
 import React, { useState, useEffect } from "react";
 import { Users, Shield, Crown, DollarSign, Star, User, X } from "lucide-react";
-import useStore from "../store/useStore"; // Fixed import (default export)
+import useStore from "../store/useStore";
 
 const RoleManagement = ({ isOpen, onClose, session }) => {
-  const { users, updateUserRole, fetchUsers } = useStore(); // Changed from 'members' to 'users'
+  const { users, profile, updateUserRole, fetchUsers } = useStore();
   const [selectedUser, setSelectedUser] = useState(null);
   const [newRole, setNewRole] = useState("");
   const [loading, setLoading] = useState(false);
 
-  // Fixed role hierarchy (higher number = higher privilege)
   const roleHierarchy = {
     member: 0,
     senior_executive: 1,
@@ -38,45 +37,35 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
 
   useEffect(() => {
     if (isOpen) {
-      fetchUsers(); // Changed from fetchMembers to fetchUsers
+      fetchUsers();
     }
   }, [isOpen, fetchUsers]);
 
-  // Get current user's role
-  const currentUser = users.find((m) => m.id === session?.user?.id); // Changed from 'members' to 'users'
+  // Use profile from store instead of finding in users array
+  const currentUser = profile;
   const currentUserRole = currentUser?.role || "member";
 
+  console.log("DEBUG: Current user from profile:", currentUser);
   console.log("DEBUG: Current user role:", currentUserRole);
   console.log("DEBUG: All users:", users);
 
-  // Fixed: Proper role management logic
   const canManageRole = (managerRole, targetRole) => {
     const managerLevel = roleHierarchy[managerRole] || 0;
     const targetLevel = roleHierarchy[targetRole] || 0;
 
-    // Admin can manage everyone except other admins
     if (managerRole === "admin") {
       return targetRole !== "admin";
     }
-
-    // Others can manage roles below them
     return managerLevel > targetLevel;
   };
 
-  // Fixed: Show users that can be managed
   const filteredMembers = users.filter((user) => {
-    // Changed from 'members' to 'users'
-    // Don't show the current user in the management list
     if (user.id === session?.user?.id) return false;
-
-    // Show users that the current user can manage
     return canManageRole(currentUserRole, user.role);
   });
 
-  // SIMPLIFIED: Get available roles for assignment
   const getAvailableRoles = (currentUserRole) => {
     console.log("DEBUG: Getting available roles for:", currentUserRole);
-
     const allRoles = [
       { value: "member", label: "Member" },
       { value: "senior_executive", label: "Senior Executive" },
@@ -85,13 +74,11 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
       { value: "president", label: "President" },
     ];
 
-    // If admin, show ALL roles (except admin itself)
     if (currentUserRole === "admin") {
       console.log("DEBUG: Admin detected, showing all roles");
       return allRoles;
     }
 
-    // For others, filter based on hierarchy
     const managerLevel = roleHierarchy[currentUserRole] || 0;
     const availableRoles = allRoles.filter((role) => {
       const roleLevel = roleHierarchy[role.value] || 0;
@@ -110,7 +97,7 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
       await updateUserRole(selectedUser.id, newRole);
       setSelectedUser(null);
       setNewRole("");
-      await fetchUsers(); // Changed from fetchMembers to fetchUsers
+      await fetchUsers();
     } catch (error) {
       console.error("Failed to update role:", error);
     } finally {
@@ -121,6 +108,31 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
   const availableRoles = getAvailableRoles(currentUserRole);
 
   if (!isOpen) return null;
+
+  // Don't render if no current user profile
+  if (!currentUser) {
+    return (
+      <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+          <div className="text-center">
+            <AlertCircle className="w-12 h-12 text-red-500 mx-auto mb-4" />
+            <h3 className="text-lg font-semibold text-gray-900 mb-2">
+              Profile Not Loaded
+            </h3>
+            <p className="text-gray-600 mb-4">
+              Your profile data is not available. Please refresh the page.
+            </p>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700"
+            >
+              Close
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -148,7 +160,9 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
                 className: "w-5 h-5",
               })}
               <span
-                className={`px-3 py-1 rounded-full text-sm font-medium ${roleColors[currentUserRole]}`}
+                className={`px-3 py-1 rounded-full text-sm font-medium ${
+                  roleColors[currentUserRole]
+                }`}
               >
                 {currentUserRole
                   .replace("_", " ")
@@ -177,7 +191,6 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
               <h3 className="text-lg font-medium text-gray-900">
                 Manageable Users ({filteredMembers.length})
               </h3>
-
               <div className="grid gap-4">
                 {filteredMembers.map((member) => {
                   const RoleIcon = roleIcons[member.role] || User;
@@ -201,7 +214,9 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
                           <div className="flex items-center space-x-2 mt-1">
                             <RoleIcon className="w-4 h-4" />
                             <span
-                              className={`px-2 py-1 rounded-full text-xs font-medium ${roleColors[member.role]}`}
+                              className={`px-2 py-1 rounded-full text-xs font-medium ${
+                                roleColors[member.role]
+                              }`}
                             >
                               {member.role
                                 .replace("_", " ")
@@ -213,7 +228,6 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
                           </div>
                         </div>
                       </div>
-
                       <button
                         onClick={() => {
                           setSelectedUser(member);
@@ -254,7 +268,9 @@ const RoleManagement = ({ isOpen, onClose, session }) => {
                         },
                       )}
                       <span
-                        className={`px-3 py-1 rounded-full text-sm font-medium ${roleColors[selectedUser.role]}`}
+                        className={`px-3 py-1 rounded-full text-sm font-medium ${
+                          roleColors[selectedUser.role]
+                        }`}
                       >
                         {selectedUser.role
                           .replace("_", " ")
