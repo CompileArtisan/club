@@ -696,90 +696,38 @@ const useStore = create((set, get) => ({
     try {
       console.log("Updating user role:", userId, "to", newRole);
 
-      const { profile, users } = get();
+      const { profile } = get();
 
       if (!profile) {
         throw new Error("Your profile is not loaded. Please refresh the page.");
       }
 
-      if (!get().canManageRoles()) {
-        throw new Error("You don't have permission to manage roles");
-      }
-
-      const targetUser = users.find((u) => u.id === userId);
-      if (!targetUser) {
-        throw new Error("User not found");
-      }
-
-      const roleHierarchy = {
-        admin: 6,
-        president: 5,
-        vice_president: 4,
-        treasurer: 3,
-        senior_executive: 2,
-        member: 1,
-      };
-
-      const currentUserLevel = roleHierarchy[profile.role] || 0;
-      const targetUserLevel = roleHierarchy[targetUser.role] || 0;
-      const newRoleLevel = roleHierarchy[newRole] || 0;
-
-      // Role validation logic
-      if (profile.role === "admin") {
-        if (newRole === "admin") {
-          throw new Error("Only super-admin can assign admin role");
-        }
-      } else {
-        if (newRole === "admin") {
-          throw new Error("Only admins can assign the admin role");
-        }
-        if (
-          newRole === "president" &&
-          !["admin", "president"].includes(profile.role)
-        ) {
-          throw new Error(
-            "Only presidents and admins can assign the president role",
-          );
-        }
-        if (targetUserLevel >= currentUserLevel) {
-          throw new Error("You cannot manage users at your level or higher");
-        }
-        if (newRoleLevel >= currentUserLevel) {
-          throw new Error("You cannot assign roles at your level or higher");
-        }
-      }
-
-      const { data, error } = await supabase
-        .from("profiles")
-        .update({
-          role: newRole,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", userId)
-        .select()
-        .single();
+      // Use the secure function instead of direct UPDATE
+      const { data, error } = await supabase.rpc("update_user_role_secure", {
+        target_user_id: userId,
+        new_role: newRole,
+      });
 
       if (error) throw error;
 
-      // Update both users array and profile if it's the current user
+      console.log("Role update successful:", data);
+
+      // Update the users array in state
       set((state) => ({
         users: state.users.map((user) =>
           user.id === userId ? { ...user, role: newRole } : user,
         ),
-        // Update profile if this is the current user
-        profile:
-          state.profile?.id === userId
-            ? { ...state.profile, role: newRole }
-            : state.profile,
         showRoleManagement: false,
       }));
+
+      // Refresh users to get updated data
+      await get().fetchUsers();
 
       const updatedUser = get().users.find((u) => u.id === userId);
       toast.success(
         `Successfully updated ${updatedUser?.username || "user"}'s role to ${newRole.replace("_", " ")}`,
       );
 
-      console.log("Role updated successfully:", data);
       return { data, error: null };
     } catch (error) {
       console.error("Error updating user role:", error);
