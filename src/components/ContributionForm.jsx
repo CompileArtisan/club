@@ -11,7 +11,7 @@ const ContributionForm = ({
 }) => {
   const [formData, setFormData] = useState({
     member_id: "",
-    activity_id: "",
+    activity_id: "", // This will be converted to null if empty
     description: "",
     points: 10,
     contribution_type: "participation",
@@ -24,11 +24,9 @@ const ContributionForm = ({
 
     console.log("ContributionForm - Current user:", currentUser);
     console.log("ContributionForm - Current user role:", currentUser.role);
-    console.log("ContributionForm - All users:", users);
 
     let eligible = [];
 
-    // Make sure we have a valid role
     if (!currentUser.role) {
       console.error("Current user has no role defined");
       setEligibleUsers([]);
@@ -37,11 +35,9 @@ const ContributionForm = ({
 
     switch (currentUser.role) {
       case "admin":
-        // Admin can manage everyone except themselves
         eligible = users.filter((user) => user.id !== currentUser.id);
         break;
       case "president":
-        // President can manage everyone except themselves
         eligible = users.filter((user) => user.id !== currentUser.id);
         break;
       case "vice_president":
@@ -81,11 +77,22 @@ const ContributionForm = ({
 
     setIsLoading(true);
     try {
-      await onSubmit({
+      // Clean the data before submitting - convert empty strings to null for UUID fields
+      const cleanedData = {
         ...formData,
         points: parseInt(formData.points),
         date: new Date().toISOString().split("T")[0],
-      });
+        // Convert empty activity_id to null
+        activity_id: formData.activity_id || null,
+        // Ensure member_id is not empty
+        member_id: formData.member_id || null,
+      };
+
+      console.log("Submitting contribution data:", cleanedData);
+
+      await onSubmit(cleanedData);
+
+      // Reset form
       setFormData({
         member_id: "",
         activity_id: "",
@@ -96,6 +103,7 @@ const ContributionForm = ({
       onClose();
     } catch (error) {
       console.error("Error creating contribution:", error);
+      alert("Error creating contribution: " + error.message);
     } finally {
       setIsLoading(false);
     }
@@ -125,7 +133,6 @@ const ContributionForm = ({
 
   if (!isOpen) return null;
 
-  // Show error if currentUser is not properly loaded
   if (!currentUser) {
     return (
       <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -167,20 +174,6 @@ const ContributionForm = ({
         </div>
 
         <div className="p-6 space-y-4">
-          {/* Debug info */}
-          <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
-            <h4 className="font-medium text-blue-900 mb-2">
-              Current User Info
-            </h4>
-            <p className="text-sm text-blue-800">
-              <strong>Username:</strong> {currentUser.username}
-              <br />
-              <strong>Role:</strong> {currentUser.role}
-              <br />
-              <strong>Eligible Users:</strong> {eligibleUsers.length}
-            </p>
-          </div>
-
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
               Member *
