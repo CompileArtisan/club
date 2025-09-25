@@ -1224,6 +1224,14 @@ const useStore = create((set, get) => ({
       now.getDate(),
     );
 
+    // Basic statistics
+    const totalUsers = users.length;
+    const totalActivities = activities.length;
+    const totalContributions = contributions.length;
+    const totalPoints = users.reduce((sum, user) => sum + user.points, 0);
+    const averagePoints =
+      totalUsers > 0 ? Math.round(totalPoints / totalUsers) : 0;
+
     // Monthly statistics
     const recentContributions = contributions.filter(
       (c) => new Date(c.created_at) >= oneMonthAgo,
@@ -1236,6 +1244,26 @@ const useStore = create((set, get) => ({
     const recentActivities = activities.filter(
       (a) => new Date(a.date) >= oneMonthAgo,
     );
+    const newUsers = users.filter((u) => new Date(u.created_at) >= oneMonthAgo);
+
+    // Level distribution
+    const levelDistribution = users.reduce((acc, user) => {
+      acc[user.level] = (acc[user.level] || 0) + 1;
+      return acc;
+    }, {});
+
+    // Role distribution
+    const roleDistribution = users.reduce((acc, user) => {
+      acc[user.role] = (acc[user.role] || 0) + 1;
+      return acc;
+    }, {});
+
+    // Contribution type distribution
+    const contributionsByType = contributions.reduce((acc, contrib) => {
+      acc[contrib.contribution_type] =
+        (acc[contrib.contribution_type] || 0) + 1;
+      return acc;
+    }, {});
 
     // User engagement scores
     const userEngagement = users
@@ -1297,16 +1325,42 @@ const useStore = create((set, get) => ({
       totalPoints: data.totalPoints,
     }));
 
+    // Top contributors for leaderboard
+    const leaderboard = [...users]
+      .sort((a, b) => b.points - a.points)
+      .slice(0, 10);
+
     return {
+      // Overview section (required by AnalyticsDashboard)
+      overview: {
+        totalUsers,
+        totalActivities,
+        totalContributions,
+        totalPoints,
+        averagePoints,
+      },
+
+      // Distributions section (required by AnalyticsDashboard)
+      distributions: {
+        levelDistribution,
+        roleDistribution,
+        contributionsByType,
+      },
+
+      // Leaderboard section (required by AnalyticsDashboard)
+      leaderboard,
+
+      // Recent activity section (required by AnalyticsDashboard)
+      recent: {
+        contributions: recentContributions.length,
+        activities: recentActivities.length,
+        newUsers: newUsers.length,
+      },
+
+      // Additional analytics data
       userEngagement,
       contributionTrends,
       rolePerformance,
-      recentActivity: {
-        contributions: recentContributions.length,
-        activities: recentActivities.length,
-        newUsers: users.filter((u) => new Date(u.created_at) >= oneMonthAgo)
-          .length,
-      },
     };
   },
 
