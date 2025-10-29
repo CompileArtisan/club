@@ -11,7 +11,7 @@ const ContributionForm = ({
 }) => {
   const [formData, setFormData] = useState({
     member_id: "",
-    activity_id: "", // This will be converted to null if empty
+    activity_id: "",
     description: "",
     points: 10,
     contribution_type: "participation",
@@ -69,28 +69,34 @@ const ContributionForm = ({
     setEligibleUsers(eligible);
   }, [currentUser, users]);
 
-  const handleSubmit = async () => {
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
     if (!formData.member_id || !formData.description) {
       alert("Please fill in all required fields");
       return;
     }
 
+    // Validate points range
+    const points = parseInt(formData.points);
+    if (points < 1 || points > 100) {
+      alert("Points must be between 1 and 100");
+      return;
+    }
+
     setIsLoading(true);
     try {
-      // Clean the data before submitting - convert empty strings to null for UUID fields
-      const cleanedData = {
+      const submitData = {
         ...formData,
-        points: parseInt(formData.points),
+        points: points,
         date: new Date().toISOString().split("T")[0],
-        // Convert empty activity_id to null
         activity_id: formData.activity_id || null,
-        // Ensure member_id is not empty
         member_id: formData.member_id || null,
       };
 
-      console.log("Submitting contribution data:", cleanedData);
+      console.log("Submitting contribution data:", submitData);
 
-      await onSubmit(cleanedData);
+      await onSubmit(submitData);
 
       // Reset form
       setFormData({
@@ -129,6 +135,17 @@ const ContributionForm = ({
       contribution_type: type,
       points: getPointsSuggestion(type),
     });
+  };
+
+  const handlePointsChange = (value) => {
+    const points = parseInt(value);
+    if (points > 100) {
+      setFormData({ ...formData, points: 100 });
+    } else if (points < 1) {
+      setFormData({ ...formData, points: 1 });
+    } else {
+      setFormData({ ...formData, points: value });
+    }
   };
 
   if (!isOpen) return null;
@@ -249,25 +266,31 @@ const ContributionForm = ({
 
           <div>
             <label className="block text-sm font-medium text-gray-700 mb-1">
-              Points to Award
+              Points to Award (1-100) *
             </label>
             <div className="relative">
               <Award className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 w-4 h-4" />
               <input
                 type="number"
                 value={formData.points}
-                onChange={(e) =>
-                  setFormData({ ...formData, points: e.target.value })
-                }
+                onChange={(e) => handlePointsChange(e.target.value)}
                 className="w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500"
                 min="1"
                 max="100"
                 required
               />
             </div>
-            <p className="text-xs text-gray-500 mt-1">
-              Suggested: {getPointsSuggestion(formData.contribution_type)}{" "}
-              points for {formData.contribution_type.replace("_", " ")}
+            <div className="flex justify-between items-center mt-1">
+              <p className="text-xs text-gray-500">
+                Suggested: {getPointsSuggestion(formData.contribution_type)}{" "}
+                points for {formData.contribution_type.replace("_", " ")}
+              </p>
+              <p className="text-xs font-medium text-blue-600">
+                Max: 100 points
+              </p>
+            </div>
+            <p className="text-xs text-amber-600 mt-1">
+              💡 You'll also receive {Math.floor(parseInt(formData.points) * 0.1)} appreciation points for recording this!
             </p>
           </div>
 
