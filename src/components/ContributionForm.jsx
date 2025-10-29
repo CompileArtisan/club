@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { X, User, Award, FileText } from "lucide-react";
+import { X, User, Award, FileText, AlertCircle } from "lucide-react";
 
 const ContributionForm = ({
   isOpen,
@@ -139,12 +139,14 @@ const ContributionForm = ({
 
   const handlePointsChange = (value) => {
     const points = parseInt(value);
-    if (points > 100) {
+    if (isNaN(points)) {
+      setFormData({ ...formData, points: "" });
+    } else if (points > 100) {
       setFormData({ ...formData, points: 100 });
     } else if (points < 1) {
       setFormData({ ...formData, points: 1 });
     } else {
-      setFormData({ ...formData, points: value });
+      setFormData({ ...formData, points: points });
     }
   };
 
@@ -174,6 +176,8 @@ const ContributionForm = ({
       </div>
     );
   }
+
+  const appreciationPoints = Math.max(1, Math.floor(parseInt(formData.points || 0) * 0.1));
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -290,7 +294,7 @@ const ContributionForm = ({
               </p>
             </div>
             <p className="text-xs text-amber-600 mt-1">
-              💡 You'll also receive {Math.floor(parseInt(formData.points) * 0.1)} appreciation points for recording this!
+              💡 You'll receive {appreciationPoints} appreciation point{appreciationPoints !== 1 ? 's' : ''} for recording this!
             </p>
           </div>
 

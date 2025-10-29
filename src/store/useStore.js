@@ -457,82 +457,95 @@ const useStore = create((set, get) => ({
     }
   },
 
-  createContribution: async (contributionData, userId) => {
-    try {
-      console.log("Creating contribution:", contributionData);
-      const { users } = get();
+createContribution: async (contributionData, userId) => {
+  try {
+    console.log("Creating contribution:", contributionData);
+    const { users } = get();
 
-      const targetUser = users.find((u) => u.id === contributionData.member_id);
-      if (!targetUser) throw new Error("Target user not found");
+    const targetUser = users.find((u) => u.id === contributionData.member_id);
+    if (!targetUser) throw new Error("Target user not found");
 
-      // Verify permission hierarchy
-      const currentUser = get().profile;
-      if (!currentUser) throw new Error("You must be logged in");
+    // Verify permission hierarchy
+    const currentUser = get().profile;
+    if (!currentUser) throw new Error("You must be logged in");
 
-      const canCreate = get().canCreateContribution();
-      if (!canCreate) {
-        throw new Error("You don't have permission to record contributions");
-      }
-
-      // Create contribution record
-      const { data: contribution, error: contributionError } = await supabase
-        .from("contributions")
-        .insert([
-          {
-            ...contributionData,
-            recorded_by: userId,
-            created_at: new Date().toISOString(),
-          },
-        ])
-        .select(
-          `
-          *,
-          member:profiles!contributions_member_id_fkey(id, username, full_name),
-          recorded_by:profiles!contributions_recorded_by_fkey(username, full_name),
-          activity:activities(title)
-        `,
-        )
-        .single();
-
-      if (contributionError) throw contributionError;
-
-      // Update user points using the database function
-      const { error: updateError } = await supabase.rpc(
-        "increment_user_points",
-        {
-          user_id: contributionData.member_id,
-          points_to_add: contributionData.points,
-        },
-      );
-
-      if (updateError) {
-        console.error("Error updating points:", updateError);
-        // Continue anyway since the contribution was recorded
-        toast.warning(
-          "Contribution recorded but points update failed. Please refresh.",
-        );
-      }
-
-      // Refresh users to get updated points and levels
-      await get().fetchUsers();
-
-      set((state) => ({
-        contributions: [contribution, ...state.contributions],
-        showContributionForm: false,
-      }));
-
-      toast.success(
-        `Contribution recorded! +${contributionData.points} points for ${targetUser.username}`,
-      );
-      console.log("Contribution created:", contribution);
-      return { data: contribution, error: null };
-    } catch (error) {
-      console.error("Error creating contribution:", error);
-      const message = handleSupabaseError(error);
-      toast.error(message);
-      return { data: null, error: message };
+    const canCreate = get().canCreateContribution();
+    if (!canCreate) {
+      throw new Error("You don't have permission to record contributions");
     }
-  },
+
+    // Create contribution record
+    const { data: contribution, error: contributionError } = await supabase
+      .from("contributions")
+      .insert([
+        {
+          ...contributionData,
+          recorded_by: userId,
+          created_at: new Date().toISOString(),
+        },
+      ])
+      .select(
+        `
+        *,
+        member:profiles!contributions_member_id_fkey(id, username, full_name),
+        recorded_by:profiles!contributions_recorded_by_fkey(username, full_name),
+        activity:activities(title)
+      `,
+      )
+      .single();
+
+    if (contributionError) throw contributionError;
+
+    // Update user points using the database function
+    const { error: updateError } = await supabase.rpc(
+      "increment_user_points",
+      {
+        user_id: contributionData.member_id,
+        points_to_add: contributionData.points,
+      },
+    );
+
+    if (updateError) {
+      console.error("Error updating points:", updateError);
+      toast.warning(
+        "Contribution recorded but points update failed. Please refresh.",
+      );
+    }
+
+    // Award appreciation points to the person recording (10% of awarded points, minimum 1)
+    const appreciationPoints = Math.max(1, Math.floor(contributionData.points * 0.1));
+    const { error: appreciationError } = await supabase.rpc(
+      "increment_user_points",
+      {
+        user_id: userId,
+        points_to_add: appreciationPoints,
+      },
+    );
+
+    if (appreciationError) {
+      console.error("Error awarding appreciation points:", appreciationError);
+    }
+
+    // Refresh users to get updated points and levels
+    await get().fetchUsers();
+
+    set((state) => ({
+      contributions: [contribution, ...state.contributions],
+      showContributionForm: false,
+    }));
+
+    toast.success(
+      `Contribution recorded! +${contributionData.points} points for ${targetUser.username}. You received +${appreciationPoints} appreciation points!`,
+    );
+    console.log("Contribution created:", contribution);
+    return { data: contribution, error: null };
+  } catch (error) {
+    console.error("Error creating contribution:", error);
+    const message = handleSupabaseError(error);
+    toast.error(message);
+    return { data: null, error: message };
+  }
+},
 
   updateContribution: async (contributionId, contributionData) => {
     try {
